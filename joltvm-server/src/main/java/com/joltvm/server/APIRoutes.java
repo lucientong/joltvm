@@ -76,21 +76,17 @@ public final class APIRoutes {
         HotSwapService hotSwapService = new HotSwapService();
         MethodTraceService traceService = new MethodTraceService();
 
-        // Phase 1 — Health check
         router.addRoute(HttpMethod.GET, "/api/health", new HealthHandler());
 
-        // Phase 2 — Class browsing & decompilation
         router.addRoute(HttpMethod.GET, "/api/classes", new ClassListHandler());
         router.addRoute(HttpMethod.GET, "/api/classes/{className}", new ClassDetailHandler());
         router.addRoute(HttpMethod.GET, "/api/classes/{className}/source", new ClassSourceHandler());
 
-        // Phase 3 — Compile, hot-swap & rollback
         router.addRoute(HttpMethod.POST, "/api/compile", new CompileHandler());
         router.addRoute(HttpMethod.POST, "/api/hotswap", new HotSwapHandler(hotSwapService));
         router.addRoute(HttpMethod.POST, "/api/rollback", new RollbackHandler(hotSwapService));
         router.addRoute(HttpMethod.GET, "/api/hotswap/history", new HotSwapHistoryHandler(hotSwapService));
 
-        // Phase 4 — Method tracing & flame graph
         router.addRoute(HttpMethod.POST, "/api/trace/start", new TraceHandler(traceService));
         router.addRoute(HttpMethod.POST, "/api/trace/stop", new TraceHandler(traceService));
         router.addRoute(HttpMethod.GET, "/api/trace/records", new TraceListHandler(traceService));
