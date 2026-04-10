@@ -14,23 +14,18 @@
  * limitations under the License.
  */
 
-plugins {
-    `java-library`
-}
+package com.joltvm.server.tracing;
 
-dependencies {
-    // Core agent module
-    implementation(project(":joltvm-agent"))
+/**
+ * Exception thrown when a method tracing operation fails.
+ */
+public class TracingException extends RuntimeException {
 
-    // HTTP/WebSocket server (Phase 2)
-    implementation("io.netty:netty-all:${property("nettyVersion")}")
+    public TracingException(String message) {
+        super(message);
+    }
 
-    // Java decompiler for viewing source code (Phase 2)
-    implementation("org.benf:cfr:${property("cfrVersion")}")
-
-    // JSON processing
-    implementation("com.google.code.gson:gson:${property("gsonVersion")}")
-
-    // Byte Buddy for method tracing (Phase 4)
-    implementation("net.bytebuddy:byte-buddy:${property("byteBuddyVersion")}")
+    public TracingException(String message, Throwable cause) {
+        super(message, cause);
+    }
 }

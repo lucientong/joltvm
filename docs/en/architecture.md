@@ -18,6 +18,7 @@ This document provides a deep dive into JoltVM's architecture, module design, an
   - [JDK Attach API](#jdk-attach-api)
   - [Bytecode Transformation Pipeline](#bytecode-transformation-pipeline)
   - [Class Hot-Swap & Rollback](#class-hot-swap--rollback)
+  - [Method Tracing & Flame Graph](#method-tracing--flame-graph)
 - [Data Flow](#data-flow)
 - [Thread Model](#thread-model)
 - [Security Model](#security-model)
@@ -153,6 +154,15 @@ The embedded HTTP server module, based on Netty 4.x, that runs inside the target
 | `ClassDetailHandler` | `GET /api/classes/{className}` — Detailed class info (fields, methods, modifiers). |
 | `ClassSourceHandler` | `GET /api/classes/{className}/source` — CFR-powered bytecode decompilation to Java source. |
 | `DecompileService` | Loads bytecode from ClassLoader, feeds to CFR via in-memory `BytecodeClassFileSource`. |
+| `MethodTraceService` | Core service orchestrating method tracing (Byte Buddy Advice injection) and stack sampling. Manages tracing/sampling lifecycle with `AtomicBoolean` state flags. |
+| `FlameGraphCollector` | Central data collector for trace records (`CopyOnWriteArrayList`, max 500) and stack samples (max 1000). Builds d3-flame-graph compatible tree structures. |
+| `FlameGraphNode` | Tree node for flame graph data. Provides `getOrCreateChild()` for tree building and `toMap()` for d3-flame-graph JSON serialization. |
+| `TraceRecord` | Immutable Java record capturing a single method invocation: class, method, arguments, return value, exception, duration, thread info, depth. |
+| `TracingException` | Standard `RuntimeException` subclass for the tracing package. |
+| `TraceHandler` | `POST /api/trace/start` and `POST /api/trace/stop` — Controls method tracing and stack sampling lifecycle. |
+| `TraceListHandler` | `GET /api/trace/records` — Returns recorded method trace entries with configurable limit. |
+| `TraceFlameGraphHandler` | `GET /api/trace/flamegraph` — Returns d3-flame-graph compatible JSON data. |
+| `TraceStatusHandler` | `GET /api/trace/status` — Returns current tracing/sampling state and statistics. |
 
 #### REST API Endpoints
 
@@ -166,6 +176,11 @@ The embedded HTTP server module, based on Netty 4.x, that runs inside the target
 | POST | `/api/hotswap` | Compile + hot-swap a class |
 | POST | `/api/rollback` | Rollback a hot-swapped class |
 | GET | `/api/hotswap/history` | Hot-swap operation history |
+| POST | `/api/trace/start` | Start method tracing or stack sampling |
+| POST | `/api/trace/stop` | Stop tracing/sampling (by type or all) |
+| GET | `/api/trace/records` | Recorded method trace entries (with limit) |
+| GET | `/api/trace/flamegraph` | Flame graph data (d3-flame-graph format) |
+| GET | `/api/trace/status` | Current tracing/sampling status |
 
 **Design considerations**:
 - Netty is chosen for its minimal footprint and zero external dependencies
@@ -363,6 +378,99 @@ JoltVM validates changes before applying and provides clear error messages when 
 - **Automatic backup**: Original bytecode is backed up before any modification
 - **Error handling**: Catches `UnsupportedOperationException`, `ClassFormatError`, and `UnmodifiableClassException` with descriptive messages
 
+### Method Tracing & Flame Graph
+
+*(Phase 4 — Implemented)*
+
+JoltVM provides two complementary profiling mechanisms: **method tracing** (Byte Buddy Advice injection) and **stack sampling** (periodic `Thread.getAllStackTraces()`).
+
+#### Method Tracing (Byte Buddy Advice)
+
+```
+POST /api/trace/start  { "type": "trace", "className": "com.example.MyService", "methodName": "process" }
+        │
+        ▼
+┌─────────────────────────┐
+│ MethodTraceService      │  Builds AgentBuilder with
+│ .startTrace()           │  RETRANSFORMATION strategy
+└────────┬────────────────┘
+         │
+         ▼
+┌─────────────────────────┐
+│ Byte Buddy AgentBuilder │  disableClassFormatChanges()
+│ + MethodTraceAdvice     │  Advice.to(MethodTraceAdvice.class)
+└────────┬────────────────┘
+         │ @Advice.OnMethodEnter / @Advice.OnMethodExit
+         ▼
+┌─────────────────────────┐
+│ MethodTraceAdvice       │  Captures: arguments, return value,
+│ (static Advice class)   │  exception, duration (nanos),
+│                         │  thread info, call depth
+└────────┬────────────────┘
+         │ TraceRecord
+         ▼
+┌─────────────────────────┐
+│ FlameGraphCollector     │  CopyOnWriteArrayList<TraceRecord>
+│ .addRecord()            │  (max 500 records, FIFO)
+└─────────────────────────┘
+```
+
+**Key design decisions**:
+- **`RETRANSFORMATION` strategy**: Uses `AgentBuilder.Default(new ByteBuddy().with(TypeValidation.DISABLED))` with `disableClassFormatChanges()` for safe runtime instrumentation that can be reverted
+- **Static `activeCollector` field**: Byte Buddy Advice classes must be static; a `volatile` static reference bridges Advice callbacks to the service's `FlameGraphCollector` instance
+- **`Assigner.Typing.DYNAMIC`**: Required for `@Advice.Return` annotation to handle dynamic return types across all instrumented methods
+- **`ConcurrentHashMap.newKeySet()`**: Tracks which classes are currently being traced for idempotent stop/cleanup
+
+#### Stack Sampling
+
+```
+POST /api/trace/start  { "type": "sample", "interval": 10 }
+        │
+        ▼
+┌─────────────────────────┐
+│ MethodTraceService      │  Spawns daemon thread:
+│ .startSampling()        │  "joltvm-stack-sampler"
+└────────┬────────────────┘
+         │ Thread.getAllStackTraces() at interval ms
+         ▼
+┌─────────────────────────┐
+│ FlameGraphCollector     │  CopyOnWriteArrayList<StackTraceElement[]>
+│ .addStackSample()       │  (max 1000 samples, FIFO)
+└────────┬────────────────┘
+         │ buildFlameGraphFromSamples()
+         ▼
+┌─────────────────────────┐
+│ FlameGraphNode (tree)   │  Root → package → class → method
+│ .toMap()                │  Output: { name, value, children }
+└─────────────────────────┘  Compatible with d3-flame-graph
+```
+
+**Sampling filter**: Daemon threads and threads whose name starts with `joltvm-` are excluded from sampling to avoid polluting the flame graph with JoltVM's own overhead.
+
+#### Flame Graph Data Model
+
+`FlameGraphNode` builds a tree structure compatible with [d3-flame-graph](https://github.com/nicedoc/d3-flame-graph):
+
+```json
+{
+  "name": "root",
+  "value": 42,
+  "children": [
+    {
+      "name": "com.example.Service.process",
+      "value": 30,
+      "children": [
+        { "name": "com.example.Dao.query", "value": 25, "children": [] }
+      ]
+    }
+  ]
+}
+```
+
+Two data sources feed the flame graph:
+1. **Trace records**: Method-level invocation data from Byte Buddy Advice (preferred when stack samples are unavailable)
+2. **Stack samples**: CPU profile data from periodic `Thread.getAllStackTraces()` calls (preferred when available, as it captures the full call stack)
+
 ---
 
 ## Data Flow
@@ -477,7 +585,7 @@ joltvm/
 │           ├── InstrumentationHolderTest.java
 │           └── AttachHelperTest.java       # 15 tests (PID validation, etc.)
 │
-├── joltvm-server/                  # ── Embedded Web Server (Phase 2+3) ──
+├── joltvm-server/                  # ── Embedded Web Server (Phase 2–4) ──
 │   ├── build.gradle.kts
 │   └── src/
 │       ├── main/java/com/joltvm/server/
@@ -496,7 +604,11 @@ joltvm/
 │       │   │   ├── CompileHandler.java     # POST /api/compile
 │       │   │   ├── HotSwapHandler.java     # POST /api/hotswap
 │       │   │   ├── RollbackHandler.java    # POST /api/rollback
-│       │   │   └── HotSwapHistoryHandler.java # GET /api/hotswap/history
+│       │   │   ├── HotSwapHistoryHandler.java # GET /api/hotswap/history
+│       │   │   ├── TraceHandler.java       # POST /api/trace/start, /api/trace/stop
+│       │   │   ├── TraceListHandler.java   # GET /api/trace/records
+│       │   │   ├── TraceFlameGraphHandler.java # GET /api/trace/flamegraph
+│       │   │   └── TraceStatusHandler.java # GET /api/trace/status
 │       │   ├── compile/
 │       │   │   ├── InMemoryCompiler.java   # javax.tools in-memory compilation
 │       │   │   ├── CompileResult.java      # Compilation result record
@@ -509,6 +621,12 @@ joltvm/
 │       │   │   ├── BytecodeBackupService.java # Original bytecode backup store
 │       │   │   ├── HotSwapRecord.java      # Audit trail record
 │       │   │   └── HotSwapException.java   # Hot-swap error
+│       │   ├── tracing/
+│       │   │   ├── MethodTraceService.java # Method tracing + stack sampling orchestration
+│       │   │   ├── FlameGraphCollector.java # Trace record + stack sample collector
+│       │   │   ├── FlameGraphNode.java     # Flame graph tree node (d3-compatible)
+│       │   │   ├── TraceRecord.java        # Single method invocation record
+│       │   │   └── TracingException.java   # Tracing error
 │       │   └── package-info.java
 │       └── test/java/com/joltvm/server/
 │           ├── HttpRouterTest.java
@@ -523,15 +641,24 @@ joltvm/
 │           │   ├── CompileHandlerTest.java
 │           │   ├── HotSwapHandlerTest.java
 │           │   ├── RollbackHandlerTest.java
-│           │   └── HotSwapHistoryHandlerTest.java
+│           │   ├── HotSwapHistoryHandlerTest.java
+│           │   ├── TraceHandlerTest.java
+│           │   ├── TraceListHandlerTest.java
+│           │   ├── TraceFlameGraphHandlerTest.java
+│           │   └── TraceStatusHandlerTest.java
 │           ├── compile/
 │           │   └── InMemoryCompilerTest.java
 │           ├── decompile/
 │           │   └── DecompileServiceTest.java
-│           └── hotswap/
-│               ├── HotSwapServiceTest.java
-│               ├── BytecodeBackupServiceTest.java
-│               └── HotSwapRecordTest.java
+│           ├── hotswap/
+│           │   ├── HotSwapServiceTest.java
+│           │   ├── BytecodeBackupServiceTest.java
+│           │   └── HotSwapRecordTest.java
+│           └── tracing/
+│               ├── MethodTraceServiceTest.java
+│               ├── FlameGraphCollectorTest.java
+│               ├── FlameGraphNodeTest.java
+│               └── TraceRecordTest.java
 │
 ├── joltvm-cli/                     # ── Command-Line Tool ──
 │   ├── build.gradle.kts            # Shadow JAR + processResources for version
@@ -564,11 +691,11 @@ joltvm/
 |-------|-------|-----------------|--------|
 | **Phase 1** | Agent skeleton + Attach API + CLI | `java.lang.instrument`, `com.sun.tools.attach` | ✅ Complete |
 | **Phase 2** | Netty web server + basic APIs (list classes, decompile) | Netty, CFR | ✅ Complete |
-| **Phase 3** | Hot-swap + rollback | `redefineClasses()`, `javax.tools.JavaCompiler` | 📋 Planned |
-| **Phase 4** | Method tracing + flame graph data | Byte Buddy Advice, stack sampling | 📋 Planned |
+| **Phase 3** | Hot-swap + rollback | `redefineClasses()`, `javax.tools.JavaCompiler` | ✅ Complete |
+| **Phase 4** | Method tracing + flame graph data | Byte Buddy Advice, stack sampling | ✅ Complete |
 | **Phase 5** | Spring Boot awareness | Spring `ApplicationContext`, `RequestMappingHandlerMapping` | 📋 Planned |
 | **Phase 6** | Web UI | React, Monaco Editor, d3-flame-graph | 📋 Planned |
 
 ---
 
-*Last updated: 2026-04-10*
+*Last updated: 2026-04-11*

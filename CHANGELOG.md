@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-11
+
+### Added
+- **Method Tracing** (`MethodTraceService`) — Byte Buddy Advice injection for non-invasive method enter/exit interception, capturing arguments, return values, exceptions, and execution time
+- **Flame Graph Data** (`FlameGraphNode`, `FlameGraphCollector`) — Tree-structured data model compatible with d3-flame-graph JSON format (`{name, value, children}`)
+- **Stack Sampling** — Periodic `Thread.getAllStackTraces()` sampling for CPU flame graph generation, with configurable interval (1–1000ms)
+- **Trace Record** (`TraceRecord`) — Immutable record capturing method invocation details: id, className, methodName, parameterTypes, arguments, returnValue, exception info, duration, thread info, timestamp, and call depth
+- **REST API: `POST /api/trace/start`** — Start method tracing (Byte Buddy Advice) or stack sampling with configurable duration (max 300s)
+- **REST API: `POST /api/trace/stop`** — Stop active tracing/sampling (supports selective stop by type)
+- **REST API: `GET /api/trace/records`** — Retrieve captured trace records with pagination (limit parameter)
+- **REST API: `GET /api/trace/flamegraph`** — Get flame graph data in d3-flame-graph compatible JSON format
+- **REST API: `GET /api/trace/status`** — Query current tracing/sampling state and statistics
+- **`APIRoutes`** — Central route registration class for all 13 API endpoints (called reflectively by Agent)
+- **40+ new tests** — TraceRecord (7), FlameGraphNode (8), FlameGraphCollector (13), MethodTraceService (15), TraceHandler (10), TraceListHandler (3), TraceFlameGraphHandler (3), TraceStatusHandler (2), APIRoutes (6)
+
+### Changed
+- `APIRoutes` now registers 13 routes (was 8): added 5 trace endpoints
+- `joltvm-server` module now depends on `net.bytebuddy:byte-buddy` directly for method tracing
+- Updated project version to 0.4.0
+
 ## [0.3.0] - 2026-04-10
 
 ### Added

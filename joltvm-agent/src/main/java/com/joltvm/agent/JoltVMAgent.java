@@ -150,8 +150,6 @@ public final class JoltVMAgent {
         }
         startServer(port);
 
-        // TODO: Phase 3 — Initialize ClassTransformerManager
-        // TODO: Phase 4 — Initialize profiler components
         // TODO: Phase 5 — Detect and inspect Spring context
     }
 

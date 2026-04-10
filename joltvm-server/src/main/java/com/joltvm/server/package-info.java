@@ -19,14 +19,23 @@
  *
  * <p>Provides an embedded Netty HTTP/WebSocket server that runs inside the target JVM
  * (alongside the agent). Exposes REST APIs for the Web IDE frontend to interact with
- * the JVM: list classes, decompile source, view class details, etc.
+ * the JVM: list classes, decompile source, view class details, hot-swap, trace methods, etc.
  *
  * <h3>API Endpoints:</h3>
  * <ul>
- *   <li>{@code GET /api/health} — Health check with JVM info</li>
- *   <li>{@code GET /api/classes} — List loaded classes (paginated, filterable)</li>
- *   <li>{@code GET /api/classes/{className}} — Class detail (fields, methods, metadata)</li>
- *   <li>{@code GET /api/classes/{className}/source} — Decompiled Java source code</li>
+ *   <li>{@code GET  /api/health} — Health check with JVM info</li>
+ *   <li>{@code GET  /api/classes} — List loaded classes (paginated, filterable)</li>
+ *   <li>{@code GET  /api/classes/{className}} — Class detail (fields, methods, metadata)</li>
+ *   <li>{@code GET  /api/classes/{className}/source} — Decompiled Java source code</li>
+ *   <li>{@code POST /api/compile} — Compile Java source in memory</li>
+ *   <li>{@code POST /api/hotswap} — Compile + hot-swap a class</li>
+ *   <li>{@code POST /api/rollback} — Rollback a hot-swapped class</li>
+ *   <li>{@code GET  /api/hotswap/history} — Hot-swap operation history</li>
+ *   <li>{@code POST /api/trace/start} — Start method tracing or stack sampling</li>
+ *   <li>{@code POST /api/trace/stop} — Stop tracing/sampling</li>
+ *   <li>{@code GET  /api/trace/records} — Trace records</li>
+ *   <li>{@code GET  /api/trace/flamegraph} — Flame graph data (d3-flame-graph format)</li>
+ *   <li>{@code GET  /api/trace/status} — Tracing status</li>
  * </ul>
  *
  * @see com.joltvm.server.JoltVMServer
