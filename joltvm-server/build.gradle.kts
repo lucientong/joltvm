@@ -18,6 +18,9 @@ plugins {
     `java-library`
 }
 
+// Phase 2 placeholder — no public classes yet, suppress noisy Javadoc error
+tasks.javadoc { enabled = false }
+
 dependencies {
     // Core agent module
     implementation(project(":joltvm-agent"))
