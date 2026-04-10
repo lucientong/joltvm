@@ -47,7 +47,7 @@ public final class JoltVMAgent {
     static final int DEFAULT_PORT = 7758;
 
     private static final String SERVER_CLASS = "com.joltvm.server.JoltVMServer";
-    private static final String API_ROUTES_CLASS = "com.joltvm.server.ApiRoutes";
+    private static final String API_ROUTES_CLASS = "com.joltvm.server.APIRoutes";
 
     private static final String BANNER = """
             
@@ -168,7 +168,7 @@ public final class JoltVMAgent {
         try {
             // Reflective equivalent of:
             //   JoltVMServer server = new JoltVMServer(port);
-            //   ApiRoutes.registerAll(server.getRouter());
+            //   APIRoutes.registerAll(server.getRouter());
             //   server.start();
             Class<?> serverClass = Class.forName(SERVER_CLASS);
             server = serverClass.getConstructor(int.class).newInstance(port);

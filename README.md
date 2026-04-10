@@ -2,6 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![CI](https://github.com/lucientong/joltvm/actions/workflows/ci.yml/badge.svg)](https://github.com/lucientong/joltvm/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/lucientong/joltvm/graph/badge.svg)](https://codecov.io/gh/lucientong/joltvm)
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.lucientong/joltvm-agent)](https://central.sonatype.com/artifact/io.github.lucientong/joltvm-agent)
 [![Java](https://img.shields.io/badge/Java-17%2B-orange.svg)](https://openjdk.org/)
 [![Build](https://img.shields.io/badge/build-Gradle-02303A.svg)](https://gradle.org/)
@@ -16,7 +17,7 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ## ✨ Features
 
-> JoltVM is under active development. Phase 1 (Agent skeleton + Attach API) and Phase 2 (Netty Web Server + REST APIs) are complete. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 (Agent skeleton + Attach API), Phase 2 (Netty Web Server + REST APIs), and Phase 3 (Hot-Swap + Rollback) are complete. See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, real-time log streaming, and class/method tree navigation. Edit code and apply hot-fixes visually.
@@ -129,7 +130,7 @@ implementation("io.github.lucientong:joltvm-agent:0.2.0")
 
 - [x] **Phase 1**: Agent skeleton (premain/agentmain) + Attach API + CLI
 - [x] **Phase 2**: Netty Web Server + basic APIs (list classes, decompile source)
-- [ ] **Phase 3**: Hot-swap (compile → redefineClasses) + rollback
+- [x] **Phase 3**: Hot-swap (compile → redefineClasses) + rollback
 - [ ] **Phase 4**: Method tracing (Byte Buddy Advice) + flame graph data
 - [ ] **Phase 5**: Spring Boot awareness (Bean list, URL mapping)
 - [ ] **Phase 6**: Web UI (Monaco Editor + flame graph + real-time logs)

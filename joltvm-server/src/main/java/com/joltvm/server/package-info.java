@@ -30,7 +30,7 @@
  * </ul>
  *
  * @see com.joltvm.server.JoltVMServer
- * @see com.joltvm.server.ApiRoutes
+ * @see com.joltvm.server.APIRoutes
  * @see com.joltvm.agent.JoltVMAgent
  */
 package com.joltvm.server;

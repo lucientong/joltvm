@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-10
+
+### Added
+- **In-Memory Java Compiler** (`InMemoryCompiler`) — compiles Java source code entirely in memory using `javax.tools.JavaCompiler`, no temporary files needed
+- **Bytecode Backup Service** (`BytecodeBackupService`) — preserves original class bytecode in `ConcurrentHashMap` before hot-swap for safe rollback
+- **Hot-Swap Service** (`HotSwapService`) — orchestrates the full hot-swap lifecycle: validate → backup → redefine → record history
+- **Hot-Swap Record** (`HotSwapRecord`) — immutable audit trail entries for all hot-swap and rollback operations
+- **REST API: `POST /api/compile`** — compile Java source code in memory and return success/failure with diagnostics
+- **REST API: `POST /api/hotswap`** — full pipeline: compile source → backup original bytecode → apply hot-swap via `Instrumentation.redefineClasses()`
+- **REST API: `POST /api/rollback`** — roll back a hot-swapped class to its original bytecode
+- **REST API: `GET /api/hotswap/history`** — retrieve hot-swap operation history with rollbackable class list
+- **Compile Result** (`CompileResult`) — structured compilation output with bytecode map and error diagnostics
+- **37 new tests** — InMemoryCompiler (8), BytecodeBackupService (10), HotSwapRecord (3), CompileHandler (6), HotSwapHistoryHandler (3), APIRoutes update (1+)
+
+### Changed
+- `APIRoutes` now registers 8 routes (was 4): added compile, hotswap, rollback, and history endpoints
+- `joltvm-server` module description updated to reflect hot-swap capabilities
+
 ## [0.2.0] - 2026-04-10
 
 ### Added

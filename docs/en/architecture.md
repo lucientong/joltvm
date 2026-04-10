@@ -147,7 +147,7 @@ The embedded HTTP server module, based on Netty 4.x, that runs inside the target
 | `HttpRouter` | Path pattern matching with `{paramName}` support via regex compilation. Routes matched in registration order, first match wins. |
 | `HttpDispatcherHandler` | Netty `SimpleChannelInboundHandler` that dispatches requests to `RouteHandler` via `HttpRouter`. Handles CORS preflight (OPTIONS) and error handling. |
 | `HttpResponseHelper` | Utility class for building JSON, text, and error responses with proper Content-Type and CORS headers. |
-| `ApiRoutes` | Registers all API endpoints on the router during initialization. |
+| `APIRoutes` | Registers all API endpoints on the router during initialization. |
 | `HealthHandler` | `GET /api/health` — Returns JVM status, PID, uptime, and memory info. |
 | `ClassListHandler` | `GET /api/classes` — Paginated listing of loaded classes with package/search filters. |
 | `ClassDetailHandler` | `GET /api/classes/{className}` — Detailed class info (fields, methods, modifiers). |
@@ -162,6 +162,10 @@ The embedded HTTP server module, based on Netty 4.x, that runs inside the target
 | GET | `/api/classes` | List loaded classes (paginated, filterable) |
 | GET | `/api/classes/{className}` | Class detail (fields, methods, superclass) |
 | GET | `/api/classes/{className}/source` | Decompiled Java source code |
+| POST | `/api/compile` | Compile Java source in memory |
+| POST | `/api/hotswap` | Compile + hot-swap a class |
+| POST | `/api/rollback` | Rollback a hot-swapped class |
+| GET | `/api/hotswap/history` | Hot-swap operation history |
 
 **Design considerations**:
 - Netty is chosen for its minimal footprint and zero external dependencies
@@ -303,41 +307,45 @@ public static void attach(String pid, String agentArgs) throws Exception {
 
 ### Bytecode Transformation Pipeline
 
-*(Phase 3 — design only)*
+*(Phase 3 — Implemented)*
 
 ```
-Source Code (edited in Web IDE)
+Source Code (via REST API)
         │
         ▼
 ┌─────────────────────┐
-│ Java Compiler API   │  javax.tools.JavaCompiler
+│ InMemoryCompiler    │  javax.tools.JavaCompiler
 │ (in-memory compile) │  No temp files needed
 └────────┬────────────┘
          │ byte[]
          ▼
 ┌─────────────────────┐
-│ Bytecode Validator  │  Verify class structure,
-│                     │  check compatibility
-└────────┬────────────┘
-         │ validated byte[]
-         ▼
-┌─────────────────────┐
-│ Backup Original     │  Save original bytecode
-│ Bytecode            │  for rollback
+│ BytecodeBackupService│  Save original bytecode
+│ (ConcurrentHashMap)  │  for rollback (putIfAbsent)
 └────────┬────────────┘
          │
          ▼
 ┌─────────────────────┐
-│ Instrumentation     │  inst.redefineClasses(
-│ .redefineClasses()  │    new ClassDefinition(clazz, bytes))
+│ HotSwapService      │  inst.redefineClasses(
+│ .hotSwap()          │    new ClassDefinition(clazz, bytes))
+└────────┬────────────┘
+         │
+         ▼
+┌─────────────────────┐
+│ HotSwapRecord       │  Audit trail: action, status,
+│ (History)           │  timestamp, message
 └─────────────────────┘
 ```
 
-**Rollback mechanism**: Before each hot-swap, JoltVM saves the original bytecode in a `ConcurrentHashMap<String, byte[]>`. Rollback simply re-applies the saved bytecode.
+**In-memory compilation**: `InMemoryCompiler` uses a custom `ForwardingJavaFileManager` with `InMemorySourceFile` and `InMemoryClassFile` to compile Java source entirely in memory. Bytecode is captured via a custom `ByteArrayOutputStream.close()` callback — no temp files are created.
+
+**Rollback mechanism**: Before each hot-swap, `BytecodeBackupService` saves the original bytecode in a `ConcurrentHashMap<String, byte[]>` using `putIfAbsent` (first backup is never overwritten). Rollback retrieves the backup and re-applies it via `redefineClasses()`.
+
+**Audit trail**: Every hot-swap and rollback operation is recorded as a `HotSwapRecord` with id, className, action (HOTSWAP/ROLLBACK), status (SUCCESS/FAILED), message, and timestamp. History is stored in a `CopyOnWriteArrayList` with a maximum of 200 entries.
 
 ### Class Hot-Swap & Rollback
 
-*(Phase 3 — design only)*
+*(Phase 3 — Implemented)*
 
 JVM hot-swap via `redefineClasses()` has strict constraints:
 
@@ -348,7 +356,12 @@ JVM hot-swap via `redefineClasses()` has strict constraints:
 | Add/remove private methods (Java 9+) | Change class hierarchy |
 | | Change method signatures |
 
-JoltVM will validate changes before applying and provide clear error messages when constraints are violated.
+JoltVM validates changes before applying and provides clear error messages when constraints are violated. The `HotSwapService` handles:
+- **Capability check**: Verifies `isRedefineClassesSupported()` before attempting hot-swap
+- **Class lookup**: Finds the target class among all loaded classes via `Instrumentation.getAllLoadedClasses()`
+- **Modifiability check**: Ensures the class is modifiable via `isModifiableClass()`
+- **Automatic backup**: Original bytecode is backed up before any modification
+- **Error handling**: Catches `UnsupportedOperationException`, `ClassFormatError`, and `UnmodifiableClassException` with descriptive messages
 
 ---
 
@@ -464,7 +477,7 @@ joltvm/
 │           ├── InstrumentationHolderTest.java
 │           └── AttachHelperTest.java       # 15 tests (PID validation, etc.)
 │
-├── joltvm-server/                  # ── Embedded Web Server (Phase 2) ──
+├── joltvm-server/                  # ── Embedded Web Server (Phase 2+3) ──
 │   ├── build.gradle.kts
 │   └── src/
 │       ├── main/java/com/joltvm/server/
@@ -473,29 +486,52 @@ joltvm/
 │       │   ├── HttpDispatcherHandler.java  # Request dispatch + CORS
 │       │   ├── HttpResponseHelper.java     # JSON/text response builder
 │       │   ├── RouteHandler.java           # Functional route handler interface
-│       │   ├── ApiRoutes.java              # API route registration
+│       │   ├── APIRoutes.java              # API route registration
 │       │   ├── handler/
 │       │   │   ├── HealthHandler.java      # GET /api/health
 │       │   │   ├── ClassListHandler.java   # GET /api/classes
 │       │   │   ├── ClassDetailHandler.java # GET /api/classes/{className}
 │       │   │   ├── ClassSourceHandler.java # GET /api/classes/{className}/source
-│       │   │   └── ClassFinder.java        # Utility for finding loaded classes
+│       │   │   ├── ClassFinder.java        # Utility for finding loaded classes
+│       │   │   ├── CompileHandler.java     # POST /api/compile
+│       │   │   ├── HotSwapHandler.java     # POST /api/hotswap
+│       │   │   ├── RollbackHandler.java    # POST /api/rollback
+│       │   │   └── HotSwapHistoryHandler.java # GET /api/hotswap/history
+│       │   ├── compile/
+│       │   │   ├── InMemoryCompiler.java   # javax.tools in-memory compilation
+│       │   │   ├── CompileResult.java      # Compilation result record
+│       │   │   └── CompileException.java   # Compilation error
 │       │   ├── decompile/
 │       │   │   ├── DecompileService.java   # CFR decompilation service
 │       │   │   └── DecompileException.java # Decompilation error
+│       │   ├── hotswap/
+│       │   │   ├── HotSwapService.java     # Hot-swap orchestration + rollback
+│       │   │   ├── BytecodeBackupService.java # Original bytecode backup store
+│       │   │   ├── HotSwapRecord.java      # Audit trail record
+│       │   │   └── HotSwapException.java   # Hot-swap error
 │       │   └── package-info.java
 │       └── test/java/com/joltvm/server/
 │           ├── HttpRouterTest.java
 │           ├── HttpResponseHelperTest.java
 │           ├── JoltVMServerTest.java
-│           ├── ApiRoutesTest.java
+│           ├── APIRoutesTest.java
 │           ├── handler/
 │           │   ├── HealthHandlerTest.java
 │           │   ├── ClassListHandlerTest.java
 │           │   ├── ClassDetailHandlerTest.java
-│           │   └── ClassSourceHandlerTest.java
-│           └── decompile/
-│               └── DecompileServiceTest.java
+│           │   ├── ClassSourceHandlerTest.java
+│           │   ├── CompileHandlerTest.java
+│           │   ├── HotSwapHandlerTest.java
+│           │   ├── RollbackHandlerTest.java
+│           │   └── HotSwapHistoryHandlerTest.java
+│           ├── compile/
+│           │   └── InMemoryCompilerTest.java
+│           ├── decompile/
+│           │   └── DecompileServiceTest.java
+│           └── hotswap/
+│               ├── HotSwapServiceTest.java
+│               ├── BytecodeBackupServiceTest.java
+│               └── HotSwapRecordTest.java
 │
 ├── joltvm-cli/                     # ── Command-Line Tool ──
 │   ├── build.gradle.kts            # Shadow JAR + processResources for version

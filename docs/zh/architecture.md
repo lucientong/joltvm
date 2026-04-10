@@ -146,7 +146,7 @@ Can-Set-Native-Method-Prefix: true
 | `HttpRouter` | 路径模式匹配，支持 `{paramName}` 路径参数（通过正则编译）。路由按注册顺序匹配，首次匹配生效。 |
 | `HttpDispatcherHandler` | Netty `SimpleChannelInboundHandler`，将请求通过 `HttpRouter` 分发到 `RouteHandler`。处理 CORS 预检（OPTIONS）和异常。 |
 | `HttpResponseHelper` | 构建 JSON、文本和错误响应的工具类，自动添加 Content-Type 和 CORS 头。 |
-| `ApiRoutes` | 在初始化时将所有 API 端点注册到路由器。 |
+| `APIRoutes` | 在初始化时将所有 API 端点注册到路由器。 |
 | `HealthHandler` | `GET /api/health` — 返回 JVM 状态、PID、运行时间和内存信息。 |
 | `ClassListHandler` | `GET /api/classes` — 分页列出已加载的类，支持包名和搜索过滤。 |
 | `ClassDetailHandler` | `GET /api/classes/{className}` — 类详情（字段、方法、修饰符）。 |
@@ -302,41 +302,45 @@ public static void attach(String pid, String agentArgs) throws Exception {
 
 ### 字节码转换流水线
 
-*（Phase 3 — 仅设计）*
+*（Phase 3 — 已实现）*
 
 ```
-源代码（在 Web IDE 中编辑）
+源代码（通过 REST API 提交）
         │
         ▼
 ┌─────────────────────┐
-│ Java Compiler API   │  javax.tools.JavaCompiler
+│ InMemoryCompiler    │  javax.tools.JavaCompiler
 │ （内存中编译）       │  无需临时文件
 └────────┬────────────┘
          │ byte[]
          ▼
 ┌─────────────────────┐
-│ 字节码验证器         │  验证类结构，
-│                     │  检查兼容性
-└────────┬────────────┘
-         │ 验证后的 byte[]
-         ▼
-┌─────────────────────┐
-│ 备份原始字节码       │  保存原始字节码
-│                     │  用于回滚
+│ BytecodeBackupService│  保存原始字节码
+│ (ConcurrentHashMap)  │  用于回滚 (putIfAbsent)
 └────────┬────────────┘
          │
          ▼
 ┌─────────────────────┐
-│ Instrumentation     │  inst.redefineClasses(
-│ .redefineClasses()  │    new ClassDefinition(clazz, bytes))
+│ HotSwapService      │  inst.redefineClasses(
+│ .hotSwap()          │    new ClassDefinition(clazz, bytes))
+└────────┬────────────┘
+         │
+         ▼
+┌─────────────────────┐
+│ HotSwapRecord       │  审计追踪：操作、状态、
+│ (History)           │  时间戳、消息
 └─────────────────────┘
 ```
 
-**回滚机制**：每次热替换前，JoltVM 将原始字节码保存在 `ConcurrentHashMap<String, byte[]>` 中。回滚时只需重新应用保存的字节码。
+**内存中编译**：`InMemoryCompiler` 使用自定义的 `ForwardingJavaFileManager` 配合 `InMemorySourceFile` 和 `InMemoryClassFile` 完全在内存中编译 Java 源码。字节码通过自定义的 `ByteArrayOutputStream.close()` 回调捕获 —— 无需创建临时文件。
+
+**回滚机制**：每次热替换前，`BytecodeBackupService` 将原始字节码保存在 `ConcurrentHashMap<String, byte[]>` 中，使用 `putIfAbsent`（首次备份永不覆盖）。回滚时取回备份并通过 `redefineClasses()` 重新应用。
+
+**审计追踪**：每次热替换和回滚操作都记录为一个 `HotSwapRecord`，包含 id、className、action (HOTSWAP/ROLLBACK)、status (SUCCESS/FAILED)、message 和 timestamp。历史记录存储在 `CopyOnWriteArrayList` 中，最多保留 200 条。
 
 ### 类热替换与回滚
 
-*（Phase 3 — 仅设计）*
+*（Phase 3 — 已实现）*
 
 JVM 通过 `redefineClasses()` 进行热替换有严格的约束：
 
@@ -347,7 +351,12 @@ JVM 通过 `redefineClasses()` 进行热替换有严格的约束：
 | 增删 private 方法（Java 9+） | 改变类继承关系 |
 | | 修改方法签名 |
 
-JoltVM 会在应用修改前进行验证，当违反约束时提供清晰的错误信息。
+JoltVM 会在应用修改前进行验证，当违反约束时提供清晰的错误信息。`HotSwapService` 处理以下环节：
+- **能力检查**：通过 `isRedefineClassesSupported()` 验证 JVM 支持热替换
+- **类查找**：通过 `Instrumentation.getAllLoadedClasses()` 在已加载类中查找目标类
+- **可修改性检查**：通过 `isModifiableClass()` 确保类可被修改
+- **自动备份**：在任何修改前自动备份原始字节码
+- **异常处理**：捕获 `UnsupportedOperationException`、`ClassFormatError`、`UnmodifiableClassException` 并提供描述性消息
 
 ---
 
@@ -463,7 +472,7 @@ joltvm/
 │           ├── InstrumentationHolderTest.java
 │           └── AttachHelperTest.java       # 15 个测试（PID 验证等）
 │
-├── joltvm-server/                  # ── 嵌入式 Web 服务器（Phase 2）──
+├── joltvm-server/                  # ── 嵌入式 Web 服务器（Phase 2+3）──
 │   ├── build.gradle.kts
 │   └── src/
 │       ├── main/java/com/joltvm/server/
@@ -478,10 +487,23 @@ joltvm/
 │       │   │   ├── ClassListHandler.java   # GET /api/classes
 │       │   │   ├── ClassDetailHandler.java # GET /api/classes/{className}
 │       │   │   ├── ClassSourceHandler.java # GET /api/classes/{className}/source
-│       │   │   └── ClassFinder.java        # 已加载类查找工具
+│       │   │   ├── ClassFinder.java        # 已加载类查找工具
+│       │   │   ├── CompileHandler.java     # POST /api/compile
+│       │   │   ├── HotSwapHandler.java     # POST /api/hotswap
+│       │   │   ├── RollbackHandler.java    # POST /api/rollback
+│       │   │   └── HotSwapHistoryHandler.java # GET /api/hotswap/history
+│       │   ├── compile/
+│       │   │   ├── InMemoryCompiler.java   # javax.tools 内存中编译
+│       │   │   ├── CompileResult.java      # 编译结果 record
+│       │   │   └── CompileException.java   # 编译异常
 │       │   ├── decompile/
 │       │   │   ├── DecompileService.java   # CFR 反编译服务
 │       │   │   └── DecompileException.java # 反编译异常
+│       │   ├── hotswap/
+│       │   │   ├── HotSwapService.java     # 热替换编排 + 回滚
+│       │   │   ├── BytecodeBackupService.java # 原始字节码备份存储
+│       │   │   ├── HotSwapRecord.java      # 审计追踪记录
+│       │   │   └── HotSwapException.java   # 热替换异常
 │       │   └── package-info.java
 │       └── test/java/com/joltvm/server/
 │           ├── HttpRouterTest.java
@@ -492,9 +514,16 @@ joltvm/
 │           │   ├── HealthHandlerTest.java
 │           │   ├── ClassListHandlerTest.java
 │           │   ├── ClassDetailHandlerTest.java
-│           │   └── ClassSourceHandlerTest.java
-│           └── decompile/
-│               └── DecompileServiceTest.java
+│           │   ├── ClassSourceHandlerTest.java
+│           │   ├── CompileHandlerTest.java
+│           │   └── HotSwapHistoryHandlerTest.java
+│           ├── compile/
+│           │   └── InMemoryCompilerTest.java   # 8 个测试
+│           ├── decompile/
+│           │   └── DecompileServiceTest.java
+│           └── hotswap/
+│               ├── BytecodeBackupServiceTest.java # 10 个测试
+│               └── HotSwapRecordTest.java         # 3 个测试
 │
 ├── joltvm-cli/                     # ── 命令行工具 ──
 │   ├── build.gradle.kts            # Shadow JAR + processResources 版本注入

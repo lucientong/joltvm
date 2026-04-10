@@ -2,6 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![CI](https://github.com/lucientong/joltvm/actions/workflows/ci.yml/badge.svg)](https://github.com/lucientong/joltvm/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/lucientong/joltvm/graph/badge.svg)](https://codecov.io/gh/lucientong/joltvm)
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.lucientong/joltvm-agent)](https://central.sonatype.com/artifact/io.github.lucientong/joltvm-agent)
 [![Java](https://img.shields.io/badge/Java-17%2B-orange.svg)](https://openjdk.org/)
 [![Build](https://img.shields.io/badge/build-Gradle-02303A.svg)](https://gradle.org/)
@@ -128,7 +129,7 @@ implementation("io.github.lucientong:joltvm-agent:0.2.0")
 
 - [x] **Phase 1**：Agent 骨架（premain/agentmain）+ Attach API + CLI
 - [x] **Phase 2**：Netty Web Server + 基础 API（列出类、反编译源码）
-- [ ] **Phase 3**：热替换（编译 → redefineClasses）+ 回滚
+- [x] **Phase 3**：热替换（编译 → redefineClasses）+ 回滚
 - [ ] **Phase 4**：方法追踪（Byte Buddy Advice）+ 火焰图数据
 - [ ] **Phase 5**：Spring Boot 感知（Bean 列表、URL 映射）
 - [ ] **Phase 6**：Web UI（Monaco Editor + 火焰图 + 实时日志）

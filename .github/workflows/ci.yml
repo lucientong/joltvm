@@ -1,8 +1,9 @@
 # =============================================================================
-# GitHub Actions CI — Build & Test
+# GitHub Actions CI — Build, Test & Coverage
 # =============================================================================
 # Runs on every push and pull request to ensure the project compiles and all
 # tests pass. Matrix strategy covers Java 17 and 21 on Ubuntu and macOS.
+# Coverage is uploaded to Codecov from the Ubuntu + Java 17 build.
 
 name: CI
 
@@ -40,6 +41,17 @@ jobs:
 
       - name: Build and test
         run: ./gradlew build --no-daemon --warning-mode all
+
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.java == '17'
+        uses: codecov/codecov-action@v5
+        with:
+          files: '**/build/reports/jacoco/test/jacocoTestReport.xml'
+          flags: unittests
+          fail_ci_if_error: false
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload test reports
         if: failure()

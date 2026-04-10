@@ -52,6 +52,7 @@ subprojects {
     apply(plugin = "java-library")
     apply(plugin = "maven-publish")
     apply(plugin = "signing")
+    apply(plugin = "jacoco")
 
     java {
         toolchain {
@@ -83,6 +84,15 @@ subprojects {
             showExceptions = true
             showCauses = true
             showStackTraces = true
+        }
+        finalizedBy(tasks.named("jacocoTestReport"))
+    }
+
+    tasks.withType<JacocoReport> {
+        dependsOn(tasks.withType<Test>())
+        reports {
+            xml.required.set(true)
+            html.required.set(true)
         }
     }
 
