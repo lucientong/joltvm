@@ -1,0 +1,487 @@
+# JoltVM Architecture
+
+This document provides a deep dive into JoltVM's architecture, module design, and implementation principles. For a quick overview and usage guide, see the [README](../../README.md).
+
+---
+
+## Table of Contents
+
+- [System Overview](#system-overview)
+- [Module Architecture](#module-architecture)
+  - [joltvm-agent](#joltvm-agent)
+  - [joltvm-server](#joltvm-server)
+  - [joltvm-cli](#joltvm-cli)
+  - [joltvm-ui](#joltvm-ui)
+- [Core Mechanisms](#core-mechanisms)
+  - [Java Instrumentation API](#java-instrumentation-api)
+  - [Agent Loading Modes](#agent-loading-modes)
+  - [JDK Attach API](#jdk-attach-api)
+  - [Bytecode Transformation Pipeline](#bytecode-transformation-pipeline)
+  - [Class Hot-Swap & Rollback](#class-hot-swap--rollback)
+- [Data Flow](#data-flow)
+- [Thread Model](#thread-model)
+- [Security Model](#security-model)
+- [Technology Stack](#technology-stack)
+- [Project Structure](#project-structure)
+- [Phased Development Plan](#phased-development-plan)
+
+---
+
+## System Overview
+
+JoltVM is a JVM online diagnostics and hot-fix framework. It runs **inside** the target JVM process as a Java Agent, providing runtime introspection and bytecode modification capabilities through a browser-based Web IDE.
+
+```
+                         ┌─── Developer's Browser ───┐
+                         │                           │
+                         │   joltvm-ui (Web IDE)     │
+                         │   ┌───────────────────┐   │
+                         │   │  Monaco Editor    │   │
+                         │   │  Flame Graph      │   │
+                         │   │  Class Tree       │   │
+                         │   │  Audit Dashboard  │   │
+                         │   └────────┬──────────┘   │
+                         │            │ HTTP/WS      │
+                         └────────────┼──────────────┘
+                                      │
+                         ┌────────────┼──────────────┐
+                         │  Target JVM Process       │
+                         │            │              │
+                         │   ┌────────┴─────────┐    │
+                         │   │  joltvm-server   │    │
+                         │   │  (Netty HTTP/WS) │    │
+                         │   └────────┬─────────┘    │
+                         │            │ Internal API │
+                         │   ┌────────┴─────────┐    │
+                         │   │  joltvm-agent    │    │
+                         │   │  ┌─────────────┐ │    │
+                         │   │  │ Instrument  │ │    │
+                         │   │  │ ation API   │ │    │
+                         │   │  ├─────────────┤ │    │
+                         │   │  │ Bytecode    │ │    │
+                         │   │  │ Engine      │ │    │
+                         │   │  ├─────────────┤ │    │
+                         │   │  │ Profiler    │ │    │
+                         │   │  ├─────────────┤ │    │
+                         │   │  │ Spring      │ │    │
+                         │   │  │ Awareness   │ │    │
+                         │   │  └─────────────┘ │    │
+                         │   └──────────────────┘    │
+                         │            │              │
+                         │   ┌────────┴─────────┐    │
+                         │   │  Your Application │    │
+                         │   └──────────────────┘    │
+                         └───────────────────────────┘
+
+                         ┌───────────────────────────┐
+                         │  Developer's Terminal      │
+                         │                           │
+                         │  joltvm-cli               │
+                         │  (attach / list commands) │
+                         └───────────────────────────┘
+```
+
+**Key design principle**: JoltVM loads entirely into the target JVM's process space. There is no separate daemon process. The embedded web server provides a zero-install browser experience — just open `http://localhost:7758`.
+
+---
+
+## Module Architecture
+
+### joltvm-agent
+
+The core module that runs inside the target JVM. It is the only module that directly interacts with the JVM's internal state.
+
+#### Key Classes
+
+| Class | Responsibility |
+|-------|---------------|
+| `JoltVMAgent` | Agent entry point. Implements `premain()` (startup) and `agentmain()` (dynamic). Idempotent initialization with double-check pattern. |
+| `InstrumentationHolder` | Thread-safe singleton (`AtomicReference` + CAS) that stores the `java.lang.instrument.Instrumentation` instance. Fail-fast `get()` throws if not initialized. |
+| `AttachHelper` | Uses `com.sun.tools.attach.VirtualMachine` to dynamically load the agent JAR into a running JVM. Validates PID format, resolves agent JAR path, and ensures proper detach in `finally`. |
+
+#### Class Diagram
+
+```
+┌─────────────────────┐       ┌────────────────────────┐
+│    JoltVMAgent      │       │  InstrumentationHolder  │
+├─────────────────────┤       ├────────────────────────┤
+│ -initialized: bool  │──set──│ -INSTANCE: AtomicRef   │
+│ -BANNER: String     │       ├────────────────────────┤
+├─────────────────────┤       │ +set(Instrumentation)  │
+│ +premain()          │       │ +get(): Instrumentation│
+│ +agentmain()        │       │ +isAvailable(): bool   │
+│ -initialize()       │       └────────────────────────┘
+└─────────────────────┘
+           ▲
+           │ loaded by
+┌──────────┴──────────┐
+│    AttachHelper     │
+├─────────────────────┤
+│ +attach(pid, args)  │
+│ +listJvmProcesses() │
+│ -getAgentJarPath()  │
+└─────────────────────┘
+```
+
+#### Manifest Configuration
+
+The agent JAR's `MANIFEST.MF` declares both entry points:
+
+```
+Premain-Class: com.joltvm.agent.JoltVMAgent
+Agent-Class: com.joltvm.agent.JoltVMAgent
+Can-Redefine-Classes: true
+Can-Retransform-Classes: true
+Can-Set-Native-Method-Prefix: true
+```
+
+### joltvm-server
+
+*(Phase 2 — not yet implemented)*
+
+An embedded HTTP/WebSocket server based on Netty that runs inside the target JVM alongside the agent. It exposes REST APIs consumed by the Web IDE frontend.
+
+**Design considerations**:
+- Netty is chosen for its minimal footprint and zero external dependencies
+- Runs on a dedicated thread pool to avoid interfering with the application
+- WebSocket enables real-time log streaming and live method tracing
+- API endpoints follow a RESTful convention under `/api/`
+
+### joltvm-cli
+
+A command-line tool packaged as a fat JAR (via Shadow plugin). It provides two commands:
+
+| Command | Description |
+|---------|-------------|
+| `attach <pid> [agentArgs]` | Attach the JoltVM agent to a running JVM process |
+| `list` | List all visible JVM processes |
+
+**Version management**: The CLI reads its version from a `version.properties` resource file that is generated at build time by Gradle's `processResources` task, keeping it in sync with `gradle.properties`.
+
+### joltvm-ui
+
+*(Phase 6 — not yet implemented)*
+
+A React + TypeScript single-page application that provides a browser-based IDE experience. Planned components:
+
+- **Monaco Editor** — Code editing with syntax highlighting and IntelliSense
+- **d3-flame-graph** — Interactive flame graph visualization
+- **Class/Method Tree** — Hierarchical class browser with search
+- **Audit Dashboard** — View hot-fix history with diffs
+
+---
+
+## Core Mechanisms
+
+### Java Instrumentation API
+
+The foundation of JoltVM is the `java.lang.instrument` API, introduced in Java 5 and enhanced in subsequent versions. Key capabilities:
+
+```java
+public interface Instrumentation {
+    // Class transformation (Phase 3)
+    void redefineClasses(ClassDefinition... definitions);
+    void addTransformer(ClassFileTransformer transformer, boolean canRetransform);
+    void retransformClasses(Class<?>... classes);
+
+    // Class inspection (Phase 2)
+    Class[] getAllLoadedClasses();
+    Class[] getInitiatedClasses(ClassLoader loader);
+    long getObjectSize(Object objectToSize);
+
+    // Capability queries
+    boolean isRedefineClassesSupported();
+    boolean isRetransformClassesSupported();
+    boolean isNativeMethodPrefixSupported();
+}
+```
+
+JoltVM stores the `Instrumentation` instance in `InstrumentationHolder` using a CAS-based singleton pattern, ensuring thread safety without locks:
+
+```java
+private static final AtomicReference<Instrumentation> INSTANCE = new AtomicReference<>();
+
+public static void set(Instrumentation inst) {
+    INSTANCE.compareAndSet(null, inst);  // Only the first call succeeds
+}
+```
+
+### Agent Loading Modes
+
+JoltVM supports two standard Java Agent loading modes:
+
+#### 1. Startup Attachment (`premain`)
+
+```bash
+java -javaagent:joltvm-agent.jar=port=7758 -jar app.jar
+```
+
+```
+JVM Startup
+    │
+    ├── Load bootstrap classes
+    ├── Load joltvm-agent.jar
+    ├── Call JoltVMAgent.premain(args, inst)  ◄── JoltVM initialized here
+    ├── Load application classes
+    └── Call Application.main()
+```
+
+**Advantage**: The agent is loaded before any application classes, enabling instrumentation of all classes from the start.
+
+#### 2. Dynamic Attachment (`agentmain`)
+
+```bash
+java -jar joltvm-cli.jar attach <pid>
+```
+
+```
+Running JVM (pid=12345)              joltvm-cli
+    │                                    │
+    │    ◄───── VirtualMachine.attach ───┤
+    │    ◄───── vm.loadAgent(jar, args) ─┤
+    │                                    │
+    ├── JVM loads joltvm-agent.jar       │
+    ├── Calls JoltVMAgent.agentmain()    │
+    │                                    │
+    │    ─────── vm.detach ─────────────►│
+    │                                    │
+    ▼ (agent continues running inside)   ▼ (CLI exits)
+```
+
+**Advantage**: No application restart required. Attach to a running JVM when issues are detected.
+
+### JDK Attach API
+
+The `com.sun.tools.attach` API enables cross-process communication with running JVMs:
+
+```java
+// AttachHelper.attach() implementation flow:
+public static void attach(String pid, String agentArgs) throws Exception {
+    // 1. Validate PID (must be a positive integer)
+    Long.parseLong(pid.trim());
+
+    // 2. Resolve agent JAR path from CodeSource
+    String jarPath = getAgentJarPath();
+
+    // 3. Attach → Load → Detach
+    VirtualMachine vm = VirtualMachine.attach(pid);
+    try {
+        vm.loadAgent(jarPath, agentArgs);
+    } finally {
+        vm.detach();  // Always detach to release resources
+    }
+}
+```
+
+**Platform considerations**:
+- On Linux, the Attach API uses Unix domain sockets (`/tmp/.java_pid<pid>`)
+- On macOS, it uses a similar mechanism but may require running with elevated permissions
+- On Windows, it uses named pipes
+
+### Bytecode Transformation Pipeline
+
+*(Phase 3 — design only)*
+
+```
+Source Code (edited in Web IDE)
+        │
+        ▼
+┌─────────────────────┐
+│ Java Compiler API   │  javax.tools.JavaCompiler
+│ (in-memory compile) │  No temp files needed
+└────────┬────────────┘
+         │ byte[]
+         ▼
+┌─────────────────────┐
+│ Bytecode Validator  │  Verify class structure,
+│                     │  check compatibility
+└────────┬────────────┘
+         │ validated byte[]
+         ▼
+┌─────────────────────┐
+│ Backup Original     │  Save original bytecode
+│ Bytecode            │  for rollback
+└────────┬────────────┘
+         │
+         ▼
+┌─────────────────────┐
+│ Instrumentation     │  inst.redefineClasses(
+│ .redefineClasses()  │    new ClassDefinition(clazz, bytes))
+└─────────────────────┘
+```
+
+**Rollback mechanism**: Before each hot-swap, JoltVM saves the original bytecode in a `ConcurrentHashMap<String, byte[]>`. Rollback simply re-applies the saved bytecode.
+
+### Class Hot-Swap & Rollback
+
+*(Phase 3 — design only)*
+
+JVM hot-swap via `redefineClasses()` has strict constraints:
+
+| Allowed | Not Allowed |
+|---------|-------------|
+| Change method bodies | Add/remove methods |
+| Change constant pool entries | Add/remove fields |
+| Add/remove private methods (Java 9+) | Change class hierarchy |
+| | Change method signatures |
+
+JoltVM will validate changes before applying and provide clear error messages when constraints are violated.
+
+---
+
+## Data Flow
+
+### Attach Flow (Phase 1 — Implemented)
+
+```
+┌──────────┐    ┌───────────┐    ┌─────────────┐    ┌──────────┐
+│ Developer │───►│ joltvm-cli│───►│ Attach API  │───►│ Target   │
+│           │    │           │    │ (Unix sock) │    │ JVM      │
+│ attach    │    │ validate  │    │ loadAgent() │    │ agentmain│
+│ <pid>     │    │ PID       │    │             │    │ called   │
+└──────────┘    └───────────┘    └─────────────┘    └──────────┘
+```
+
+### Diagnostics Flow (Phase 2+ — Planned)
+
+```
+┌──────────┐    ┌───────────┐    ┌─────────────┐    ┌──────────┐
+│ Browser  │◄──►│  Netty    │◄──►│ joltvm-agent│───►│ Target   │
+│ Web IDE  │    │  Server   │    │ bytecode    │    │ JVM      │
+│          │    │  :7758    │    │ engine      │    │ Classes  │
+│ Monaco   │    │ REST API  │    │ profiler    │    │          │
+│ Flame    │    │ WebSocket │    │ spring ctx  │    │          │
+└──────────┘    └───────────┘    └─────────────┘    └──────────┘
+```
+
+---
+
+## Thread Model
+
+JoltVM is designed to minimize impact on the target application:
+
+| Thread / Pool | Purpose | Impact |
+|---------------|---------|--------|
+| Agent init thread | One-time initialization during `premain`/`agentmain` | Minimal — runs once |
+| Netty boss group (1 thread) | Accept incoming HTTP/WS connections | Negligible |
+| Netty worker group (2 threads) | Handle HTTP requests and WebSocket frames | Low — only active during diagnostics |
+| Profiler sampling thread | Periodic stack sampling for flame graphs | Configurable sampling interval |
+| Application threads | Not modified by JoltVM | Zero impact when not actively profiling |
+
+---
+
+## Security Model
+
+*(Phase 5+ — design only)*
+
+```
+┌─────────────────────────────────┐
+│         Security Layer          │
+├─────────────────────────────────┤
+│ Authentication                  │
+│  ├── Token-based (built-in)     │
+│  └── SSO/LDAP (enterprise)     │
+├─────────────────────────────────┤
+│ Authorization (RBAC)            │
+│  ├── Viewer: read-only access  │
+│  ├── Operator: hot-fix + trace │
+│  └── Admin: full access        │
+├─────────────────────────────────┤
+│ Audit Trail                     │
+│  ├── Every hot-fix → diff log  │
+│  ├── Timestamp + User + Reason │
+│  └── Immutable + Exportable    │
+├─────────────────────────────────┤
+│ Approval Workflow (optional)    │
+│  └── Hot-fix requires approval │
+│      from admin before applying│
+└─────────────────────────────────┘
+```
+
+---
+
+## Technology Stack
+
+| Component | Technology | Why |
+|-----------|-----------|-----|
+| Agent core | `java.lang.instrument` | JVM standard API, zero dependencies |
+| Dynamic attach | `com.sun.tools.attach` | JDK built-in, cross-platform |
+| Bytecode manipulation | Byte Buddy | High-level API, mature and well-maintained |
+| Decompilation | CFR | Best-in-class Java decompiler |
+| HTTP server | Netty 4.x | Lightweight, embeddable, async |
+| Serialization | Gson | Simple, fast, no reflection issues in agent context |
+| Logging | JUL (`java.util.logging`) | Zero dependencies — critical for agent bootstrap |
+| Build | Gradle + Shadow | Multi-module builds + fat JAR packaging |
+| CI/CD | GitHub Actions | Automated testing + Maven Central publishing |
+| Frontend | React + TypeScript | Modern, type-safe UI development |
+| Code editor | Monaco Editor | VS Code's editor component |
+| Flame graph | d3-flame-graph | Interactive, zoomable flame graphs |
+
+---
+
+## Project Structure
+
+```
+joltvm/
+├── build.gradle.kts               # Root build: plugins, maven-publish, signing
+├── settings.gradle.kts             # Multi-module project settings
+├── gradle.properties               # Version numbers, project metadata
+├── gradlew / gradlew.bat           # Gradle Wrapper
+│
+├── joltvm-agent/                   # ── Java Agent Core ──
+│   ├── build.gradle.kts            # Shadow JAR + MANIFEST.MF config
+│   └── src/
+│       ├── main/java/com/joltvm/agent/
+│       │   ├── JoltVMAgent.java        # premain() / agentmain() entry
+│       │   ├── InstrumentationHolder.java  # Thread-safe Instrumentation singleton
+│       │   ├── AttachHelper.java       # Attach API wrapper
+│       │   └── package-info.java       # Package-level Javadoc
+│       └── test/java/com/joltvm/agent/
+│           ├── JoltVMAgentTest.java        # 11 tests
+│           ├── InstrumentationHolderTest.java
+│           └── AttachHelperTest.java       # 15 tests (PID validation, etc.)
+│
+├── joltvm-server/                  # ── Embedded Web Server (Phase 2) ──
+│   ├── build.gradle.kts
+│   └── src/main/java/com/joltvm/server/
+│       └── package-info.java       # Placeholder
+│
+├── joltvm-cli/                     # ── Command-Line Tool ──
+│   ├── build.gradle.kts            # Shadow JAR + processResources for version
+│   └── src/
+│       ├── main/java/com/joltvm/cli/
+│       │   ├── JoltVMCli.java          # CLI entry point (attach, list)
+│       │   └── package-info.java
+│       └── main/resources/
+│           └── version.properties      # Generated at build time
+│
+├── docs/
+│   ├── en/architecture.md          # This document
+│   └── zh/architecture.md          # Chinese version
+│
+├── .github/workflows/
+│   ├── ci.yml                      # CI: build + test on every push/PR
+│   └── release.yml                 # Release: Maven Central + GitHub Releases
+│
+├── README.md                       # English README
+├── README_zh.md                    # Chinese README
+├── LICENSE                         # Apache License 2.0
+└── CHANGELOG.md                    # Version changelog
+```
+
+---
+
+## Phased Development Plan
+
+| Phase | Scope | Key Technologies | Status |
+|-------|-------|-----------------|--------|
+| **Phase 1** | Agent skeleton + Attach API + CLI | `java.lang.instrument`, `com.sun.tools.attach` | ✅ Complete |
+| **Phase 2** | Netty web server + basic APIs (list classes, decompile) | Netty, CFR | 📋 Planned |
+| **Phase 3** | Hot-swap + rollback | `redefineClasses()`, `javax.tools.JavaCompiler` | 📋 Planned |
+| **Phase 4** | Method tracing + flame graph data | Byte Buddy Advice, stack sampling | 📋 Planned |
+| **Phase 5** | Spring Boot awareness | Spring `ApplicationContext`, `RequestMappingHandlerMapping` | 📋 Planned |
+| **Phase 6** | Web UI | React, Monaco Editor, d3-flame-graph | 📋 Planned |
+
+---
+
+*Last updated: 2026-04-10*

@@ -1,0 +1,50 @@
+# =============================================================================
+# GitHub Actions CI — Build & Test
+# =============================================================================
+# Runs on every push and pull request to ensure the project compiles and all
+# tests pass. Matrix strategy covers Java 17 and 21 on Ubuntu and macOS.
+
+name: CI
+
+on:
+  push:
+    branches: [ master, main, 'release/**' ]
+  pull_request:
+    branches: [ master, main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & Test (Java ${{ matrix.java }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+        java: [ '17', '21' ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ matrix.java }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build and test
+        run: ./gradlew build --no-daemon --warning-mode all
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ matrix.os }}-java${{ matrix.java }}
+          path: '**/build/reports/tests/'
+          retention-days: 7
