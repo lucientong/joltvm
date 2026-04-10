@@ -3,6 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![CI](https://github.com/lucientong/joltvm/actions/workflows/ci.yml/badge.svg)](https://github.com/lucientong/joltvm/actions/workflows/ci.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.lucientong/joltvm-agent)](https://central.sonatype.com/artifact/io.github.lucientong/joltvm-agent)
+[![Maven Central Downloads](https://img.shields.io/maven-central/dt/io.github.lucientong/joltvm-agent?label=downloads)](https://central.sonatype.com/artifact/io.github.lucientong/joltvm-agent)
 [![Java](https://img.shields.io/badge/Java-17%2B-orange.svg)](https://openjdk.org/)
 [![Build](https://img.shields.io/badge/build-Gradle-02303A.svg)](https://gradle.org/)
 
@@ -110,19 +111,17 @@ JoltVM consists of four modules (see [Architecture Doc](docs/en/architecture.md)
 
 ### Maven Central
 
-> Available after the first release is published.
-
 ```xml
 <dependency>
     <groupId>io.github.lucientong</groupId>
     <artifactId>joltvm-agent</artifactId>
-    <version>0.1.0</version>
+    <version>0.1.1</version>
 </dependency>
 ```
 
 ```kotlin
 // Gradle Kotlin DSL
-implementation("io.github.lucientong:joltvm-agent:0.1.0")
+implementation("io.github.lucientong:joltvm-agent:0.1.1")
 ```
 
 ---
