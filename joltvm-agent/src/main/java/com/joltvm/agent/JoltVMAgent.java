@@ -17,6 +17,9 @@
 package com.joltvm.agent;
 
 import java.lang.instrument.Instrumentation;
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -30,8 +33,8 @@ import java.util.logging.Logger;
  * </ul>
  *
  * <p>Both entry points delegate to {@link #initialize(String, Instrumentation)} which stores
- * the {@link Instrumentation} instance in {@link InstrumentationHolder} for use by other
- * JoltVM modules.
+ * the {@link Instrumentation} instance in {@link InstrumentationHolder} and starts the
+ * embedded Netty web server (if the server module is on the classpath).
  *
  * @see InstrumentationHolder
  * @see AttachHelper
@@ -39,6 +42,12 @@ import java.util.logging.Logger;
 public final class JoltVMAgent {
 
     private static final Logger LOG = Logger.getLogger(JoltVMAgent.class.getName());
+
+    /** Default port for the JoltVM embedded web server. */
+    static final int DEFAULT_PORT = 7758;
+
+    private static final String SERVER_CLASS = "com.joltvm.server.JoltVMServer";
+    private static final String API_ROUTES_CLASS = "com.joltvm.server.ApiRoutes";
 
     private static final String BANNER = """
             
@@ -49,6 +58,9 @@ public final class JoltVMAgent {
             """;
 
     private static volatile boolean initialized = false;
+
+    /** Holds the server instance (via reflection to avoid compile-time circular dependency). */
+    private static Object server;
 
     private JoltVMAgent() {
         // Utility class — no instantiation
@@ -61,6 +73,7 @@ public final class JoltVMAgent {
      * Do not call in production code.
      */
     static void reset() {
+        stopServer();
         initialized = false;
         InstrumentationHolder.reset();
     }
@@ -126,9 +139,113 @@ public final class JoltVMAgent {
             LOG.info(String.format("Agent arguments: %s", agentArgs));
         }
 
-        // TODO: Phase 2 — Start embedded Netty web server
+        // Phase 2 — Start embedded Netty web server (loaded via reflection to avoid circular deps)
+        Map<String, String> parsedArgs = parseArgs(agentArgs);
+        int port;
+        try {
+            port = Integer.parseInt(parsedArgs.getOrDefault("port", String.valueOf(DEFAULT_PORT)));
+        } catch (NumberFormatException e) {
+            LOG.warning("Invalid port value: " + parsedArgs.get("port") + ", using default: " + DEFAULT_PORT);
+            port = DEFAULT_PORT;
+        }
+        startServer(port);
+
         // TODO: Phase 3 — Initialize ClassTransformerManager
         // TODO: Phase 4 — Initialize profiler components
         // TODO: Phase 5 — Detect and inspect Spring context
+    }
+
+    /**
+     * Starts the embedded Netty HTTP server on a daemon thread.
+     *
+     * <p>Uses reflection to instantiate the server, avoiding a compile-time dependency
+     * from joltvm-agent → joltvm-server (which would create a circular dependency
+     * since joltvm-server depends on joltvm-agent for InstrumentationHolder).
+     *
+     * @param port the port to listen on
+     */
+    private static void startServer(int port) {
+        try {
+            // Reflective equivalent of:
+            //   JoltVMServer server = new JoltVMServer(port);
+            //   ApiRoutes.registerAll(server.getRouter());
+            //   server.start();
+            Class<?> serverClass = Class.forName(SERVER_CLASS);
+            server = serverClass.getConstructor(int.class).newInstance(port);
+
+            // Get the router and register all API routes
+            Method getRouter = serverClass.getMethod("getRouter");
+            Object router = getRouter.invoke(server);
+
+            Class<?> apiRoutesClass = Class.forName(API_ROUTES_CLASS);
+            Class<?> routerClass = router.getClass();
+            Method registerAll = apiRoutesClass.getMethod("registerAll", routerClass);
+            registerAll.invoke(null, router);
+
+            // Start server on a daemon thread
+            Method startMethod = serverClass.getMethod("start");
+            Thread serverThread = new Thread(() -> {
+                try {
+                    startMethod.invoke(server);
+                } catch (Exception e) {
+                    LOG.log(Level.SEVERE, "Failed to start JoltVM server on port " + port, e);
+                }
+            }, "joltvm-server");
+            serverThread.setDaemon(true);
+            serverThread.start();
+
+            // Register shutdown hook
+            Method stopMethod = serverClass.getMethod("stop");
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                try {
+                    stopMethod.invoke(server);
+                } catch (Exception e) {
+                    LOG.log(Level.WARNING, "Error stopping JoltVM server", e);
+                }
+            }, "joltvm-shutdown"));
+
+            LOG.info(String.format("JoltVM Web IDE: http://localhost:%d", port));
+            LOG.info(String.format("JoltVM Health:  http://localhost:%d/api/health", port));
+
+        } catch (ClassNotFoundException e) {
+            LOG.info("JoltVM server module not found on classpath, skipping HTTP server startup");
+        } catch (Exception e) {
+            LOG.log(Level.SEVERE, "Failed to initialize JoltVM server", e);
+        }
+    }
+
+    /**
+     * Stops the embedded server if it is running.
+     */
+    private static void stopServer() {
+        if (server != null) {
+            try {
+                Method stopMethod = server.getClass().getMethod("stop");
+                stopMethod.invoke(server);
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Error stopping JoltVM server during reset", e);
+            }
+            server = null;
+        }
+    }
+
+    /**
+     * Parses agent arguments from "key1=val1,key2=val2" format.
+     *
+     * @param agentArgs the raw agent args string
+     * @return a map of key-value pairs
+     */
+    static Map<String, String> parseArgs(String agentArgs) {
+        Map<String, String> result = new HashMap<>();
+        if (agentArgs == null || agentArgs.isBlank()) {
+            return result;
+        }
+        for (String pair : agentArgs.split(",")) {
+            String[] kv = pair.split("=", 2);
+            if (kv.length == 2) {
+                result.put(kv[0].trim(), kv[1].trim());
+            }
+        }
+        return result;
     }
 }

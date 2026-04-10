@@ -137,14 +137,37 @@ Can-Set-Native-Method-Prefix: true
 
 ### joltvm-server
 
-*(Phase 2 — not yet implemented)*
+The embedded HTTP server module, based on Netty 4.x, that runs inside the target JVM alongside the agent. It exposes REST APIs consumed by the Web IDE frontend and CLI tools.
 
-An embedded HTTP/WebSocket server based on Netty that runs inside the target JVM alongside the agent. It exposes REST APIs consumed by the Web IDE frontend.
+#### Key Classes
+
+| Class | Responsibility |
+|-------|---------------|
+| `JoltVMServer` | Netty HTTP server lifecycle management (start/stop). Boss group (1 thread) + Worker group (2 threads). Default port 7758, configurable. Idempotent start/stop with `AtomicBoolean`. |
+| `HttpRouter` | Path pattern matching with `{paramName}` support via regex compilation. Routes matched in registration order, first match wins. |
+| `HttpDispatcherHandler` | Netty `SimpleChannelInboundHandler` that dispatches requests to `RouteHandler` via `HttpRouter`. Handles CORS preflight (OPTIONS) and error handling. |
+| `HttpResponseHelper` | Utility class for building JSON, text, and error responses with proper Content-Type and CORS headers. |
+| `ApiRoutes` | Registers all API endpoints on the router during initialization. |
+| `HealthHandler` | `GET /api/health` — Returns JVM status, PID, uptime, and memory info. |
+| `ClassListHandler` | `GET /api/classes` — Paginated listing of loaded classes with package/search filters. |
+| `ClassDetailHandler` | `GET /api/classes/{className}` — Detailed class info (fields, methods, modifiers). |
+| `ClassSourceHandler` | `GET /api/classes/{className}/source` — CFR-powered bytecode decompilation to Java source. |
+| `DecompileService` | Loads bytecode from ClassLoader, feeds to CFR via in-memory `BytecodeClassFileSource`. |
+
+#### REST API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Health check with JVM info |
+| GET | `/api/classes` | List loaded classes (paginated, filterable) |
+| GET | `/api/classes/{className}` | Class detail (fields, methods, superclass) |
+| GET | `/api/classes/{className}/source` | Decompiled Java source code |
 
 **Design considerations**:
 - Netty is chosen for its minimal footprint and zero external dependencies
 - Runs on a dedicated thread pool to avoid interfering with the application
-- WebSocket enables real-time log streaming and live method tracing
+- Agent loads server via reflection (`Class.forName`) to avoid circular compile-time dependency
+- WebSocket support planned for real-time log streaming and live method tracing (Phase 6)
 - API endpoints follow a RESTful convention under `/api/`
 
 ### joltvm-cli
@@ -342,7 +365,7 @@ JoltVM will validate changes before applying and provide clear error messages wh
 └──────────┘    └───────────┘    └─────────────┘    └──────────┘
 ```
 
-### Diagnostics Flow (Phase 2+ — Planned)
+### Diagnostics Flow (Phase 2 — Implemented)
 
 ```
 ┌──────────┐    ┌───────────┐    ┌─────────────┐    ┌──────────┐
@@ -443,8 +466,36 @@ joltvm/
 │
 ├── joltvm-server/                  # ── Embedded Web Server (Phase 2) ──
 │   ├── build.gradle.kts
-│   └── src/main/java/com/joltvm/server/
-│       └── package-info.java       # Placeholder
+│   └── src/
+│       ├── main/java/com/joltvm/server/
+│       │   ├── JoltVMServer.java           # Netty HTTP server lifecycle
+│       │   ├── HttpRouter.java             # Path pattern matching + params
+│       │   ├── HttpDispatcherHandler.java  # Request dispatch + CORS
+│       │   ├── HttpResponseHelper.java     # JSON/text response builder
+│       │   ├── RouteHandler.java           # Functional route handler interface
+│       │   ├── ApiRoutes.java              # API route registration
+│       │   ├── handler/
+│       │   │   ├── HealthHandler.java      # GET /api/health
+│       │   │   ├── ClassListHandler.java   # GET /api/classes
+│       │   │   ├── ClassDetailHandler.java # GET /api/classes/{className}
+│       │   │   ├── ClassSourceHandler.java # GET /api/classes/{className}/source
+│       │   │   └── ClassFinder.java        # Utility for finding loaded classes
+│       │   ├── decompile/
+│       │   │   ├── DecompileService.java   # CFR decompilation service
+│       │   │   └── DecompileException.java # Decompilation error
+│       │   └── package-info.java
+│       └── test/java/com/joltvm/server/
+│           ├── HttpRouterTest.java
+│           ├── HttpResponseHelperTest.java
+│           ├── JoltVMServerTest.java
+│           ├── ApiRoutesTest.java
+│           ├── handler/
+│           │   ├── HealthHandlerTest.java
+│           │   ├── ClassListHandlerTest.java
+│           │   ├── ClassDetailHandlerTest.java
+│           │   └── ClassSourceHandlerTest.java
+│           └── decompile/
+│               └── DecompileServiceTest.java
 │
 ├── joltvm-cli/                     # ── Command-Line Tool ──
 │   ├── build.gradle.kts            # Shadow JAR + processResources for version
@@ -476,7 +527,7 @@ joltvm/
 | Phase | Scope | Key Technologies | Status |
 |-------|-------|-----------------|--------|
 | **Phase 1** | Agent skeleton + Attach API + CLI | `java.lang.instrument`, `com.sun.tools.attach` | ✅ Complete |
-| **Phase 2** | Netty web server + basic APIs (list classes, decompile) | Netty, CFR | 📋 Planned |
+| **Phase 2** | Netty web server + basic APIs (list classes, decompile) | Netty, CFR | ✅ Complete |
 | **Phase 3** | Hot-swap + rollback | `redefineClasses()`, `javax.tools.JavaCompiler` | 📋 Planned |
 | **Phase 4** | Method tracing + flame graph data | Byte Buddy Advice, stack sampling | 📋 Planned |
 | **Phase 5** | Spring Boot awareness | Spring `ApplicationContext`, `RequestMappingHandlerMapping` | 📋 Planned |

@@ -60,8 +60,10 @@ tasks.shadowJar {
         )
     }
 
-    // TODO: Phase 2 - Enable dependency relocation to avoid conflicts with target application
-    // relocate("net.bytebuddy", "com.joltvm.shaded.bytebuddy")
-    // relocate("com.google.gson", "com.joltvm.shaded.gson")
-    // relocate("org.objectweb.asm", "com.joltvm.shaded.asm")
+    // Relocate shaded dependencies to avoid conflicts with target application
+    relocate("net.bytebuddy", "com.joltvm.shaded.bytebuddy")
+    relocate("com.google.gson", "com.joltvm.shaded.gson")
+    relocate("org.objectweb.asm", "com.joltvm.shaded.asm")
+    relocate("io.netty", "com.joltvm.shaded.netty")
+    relocate("org.benf.cfr", "com.joltvm.shaded.cfr")
 }

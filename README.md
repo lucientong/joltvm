@@ -14,9 +14,9 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ---
 
-## ✨ Features (Planned)
+## ✨ Features
 
-> JoltVM is under active development. Phase 1 (Agent skeleton + Attach API) is complete. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 (Agent skeleton + Attach API) and Phase 2 (Netty Web Server + REST APIs) are complete. See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, real-time log streaming, and class/method tree navigation. Edit code and apply hot-fixes visually.
@@ -100,7 +100,7 @@ JoltVM consists of four modules (see [Architecture Doc](docs/en/architecture.md)
 | Module | Description | Status |
 |--------|-------------|--------|
 | `joltvm-agent` | Java Agent core — premain/agentmain entry, Instrumentation management, Attach API | ✅ Phase 1 |
-| `joltvm-server` | Embedded Netty HTTP/WebSocket server with REST APIs | 📋 Phase 2 |
+| `joltvm-server` | Embedded Netty HTTP server with REST APIs (class list, detail, decompile) | ✅ Phase 2 |
 | `joltvm-cli` | Command-line tool for attaching agent to running JVM processes | ✅ Phase 1 |
 | `joltvm-ui` | React + TypeScript Web IDE frontend | 📋 Phase 6 |
 
@@ -114,13 +114,13 @@ JoltVM consists of four modules (see [Architecture Doc](docs/en/architecture.md)
 <dependency>
     <groupId>io.github.lucientong</groupId>
     <artifactId>joltvm-agent</artifactId>
-    <version>0.1.1</version>
+    <version>0.2.0</version>
 </dependency>
 ```
 
 ```kotlin
 // Gradle Kotlin DSL
-implementation("io.github.lucientong:joltvm-agent:0.1.1")
+implementation("io.github.lucientong:joltvm-agent:0.2.0")
 ```
 
 ---
@@ -128,7 +128,7 @@ implementation("io.github.lucientong:joltvm-agent:0.1.1")
 ## 🗺️ Roadmap
 
 - [x] **Phase 1**: Agent skeleton (premain/agentmain) + Attach API + CLI
-- [ ] **Phase 2**: Netty Web Server + basic APIs (list classes, decompile source)
+- [x] **Phase 2**: Netty Web Server + basic APIs (list classes, decompile source)
 - [ ] **Phase 3**: Hot-swap (compile → redefineClasses) + rollback
 - [ ] **Phase 4**: Method tracing (Byte Buddy Advice) + flame graph data
 - [ ] **Phase 5**: Spring Boot awareness (Bean list, URL mapping)

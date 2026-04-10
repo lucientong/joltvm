@@ -21,6 +21,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.lang.instrument.Instrumentation;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
@@ -85,5 +86,46 @@ class JoltVMAgentTest {
         when(mockInst.isRetransformClassesSupported()).thenReturn(true);
         when(mockInst.isNativeMethodPrefixSupported()).thenReturn(true);
         return mockInst;
+    }
+
+    // ========================================================================
+    // parseArgs tests
+    // ========================================================================
+
+    @Test
+    @DisplayName("parseArgs with null returns empty map")
+    void parseArgs_null_returnsEmpty() {
+        Map<String, String> result = JoltVMAgent.parseArgs(null);
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("parseArgs with blank returns empty map")
+    void parseArgs_blank_returnsEmpty() {
+        Map<String, String> result = JoltVMAgent.parseArgs("  ");
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("parseArgs with single key=value pair")
+    void parseArgs_singlePair() {
+        Map<String, String> result = JoltVMAgent.parseArgs("port=7758");
+        assertEquals("7758", result.get("port"));
+    }
+
+    @Test
+    @DisplayName("parseArgs with multiple key=value pairs")
+    void parseArgs_multiplePairs() {
+        Map<String, String> result = JoltVMAgent.parseArgs("port=7758,debug=true");
+        assertEquals("7758", result.get("port"));
+        assertEquals("true", result.get("debug"));
+    }
+
+    @Test
+    @DisplayName("parseArgs trims whitespace")
+    void parseArgs_trimsWhitespace() {
+        Map<String, String> result = JoltVMAgent.parseArgs(" port = 7758 , debug = true ");
+        assertEquals("7758", result.get("port"));
+        assertEquals("true", result.get("debug"));
     }
 }

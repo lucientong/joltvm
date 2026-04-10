@@ -19,10 +19,18 @@
  *
  * <p>Provides an embedded Netty HTTP/WebSocket server that runs inside the target JVM
  * (alongside the agent). Exposes REST APIs for the Web IDE frontend to interact with
- * the JVM: list classes, decompile source, apply hot-fixes, view traces, etc.
+ * the JVM: list classes, decompile source, view class details, etc.
  *
- * <p><b>Implementation planned for Phase 2.</b>
+ * <h3>API Endpoints:</h3>
+ * <ul>
+ *   <li>{@code GET /api/health} — Health check with JVM info</li>
+ *   <li>{@code GET /api/classes} — List loaded classes (paginated, filterable)</li>
+ *   <li>{@code GET /api/classes/{className}} — Class detail (fields, methods, metadata)</li>
+ *   <li>{@code GET /api/classes/{className}/source} — Decompiled Java source code</li>
+ * </ul>
  *
+ * @see com.joltvm.server.JoltVMServer
+ * @see com.joltvm.server.ApiRoutes
  * @see com.joltvm.agent.JoltVMAgent
  */
 package com.joltvm.server;

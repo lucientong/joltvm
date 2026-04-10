@@ -14,20 +14,18 @@
  * limitations under the License.
  */
 
-plugins {
-    `java-library`
-}
+package com.joltvm.server.decompile;
 
-dependencies {
-    // Core agent module
-    implementation(project(":joltvm-agent"))
+/**
+ * Exception thrown when class decompilation fails.
+ */
+public class DecompileException extends RuntimeException {
 
-    // HTTP/WebSocket server (Phase 2)
-    implementation("io.netty:netty-all:${property("nettyVersion")}")
+    public DecompileException(String message) {
+        super(message);
+    }
 
-    // Java decompiler for viewing source code (Phase 2)
-    implementation("org.benf:cfr:${property("cfrVersion")}")
-
-    // JSON processing
-    implementation("com.google.code.gson:gson:${property("gsonVersion")}")
+    public DecompileException(String message, Throwable cause) {
+        super(message, cause);
+    }
 }
