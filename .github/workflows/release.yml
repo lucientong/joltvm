@@ -18,6 +18,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag to release (e.g. v0.1.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -31,8 +37,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Resolve ref
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ref=refs/tags/${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.ref }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.ref }}
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -45,7 +62,8 @@ jobs:
 
       - name: Validate tag matches project version
         run: |
-          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          REF="${{ steps.resolve.outputs.ref }}"
+          TAG_VERSION="${REF#refs/tags/v}"
           PROJECT_VERSION=$(grep "^projectVersion=" gradle.properties | cut -d= -f2)
           echo "Tag version: $TAG_VERSION"
           echo "Project version: $PROJECT_VERSION"
@@ -72,6 +90,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           generate_release_notes: true
           files: |
             joltvm-agent/build/libs/*-all.jar
