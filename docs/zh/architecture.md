@@ -20,6 +20,7 @@
   - [类热替换与回滚](#类热替换与回滚)
   - [方法追踪与火焰图](#方法追踪与火焰图)
   - [Spring Boot 感知](#spring-boot-感知)
+  - [嵌入式 Web UI](#嵌入式-web-ui)
 - [数据流](#数据流)
 - [线程模型](#线程模型)
 - [安全模型](#安全模型)
@@ -146,7 +147,8 @@ Can-Set-Native-Method-Prefix: true
 |------|------|
 | `JoltVMServer` | Netty HTTP 服务器生命周期管理（启停）。Boss group（1 线程）+ Worker group（2 线程）。默认端口 7758，可配置。使用 `AtomicBoolean` 实现幂等启停。 |
 | `HttpRouter` | 路径模式匹配，支持 `{paramName}` 路径参数（通过正则编译）。路由按注册顺序匹配，首次匹配生效。 |
-| `HttpDispatcherHandler` | Netty `SimpleChannelInboundHandler`，将请求通过 `HttpRouter` 分发到 `RouteHandler`。处理 CORS 预检（OPTIONS）和异常。 |
+| `HttpDispatcherHandler` | Netty `SimpleChannelInboundHandler`，将请求通过 `HttpRouter` 分发到 `RouteHandler`。处理 CORS 预检（OPTIONS）、静态文件回退和异常。 |
+| `StaticFileHandler` | 从 classpath `webui/` 目录提供嵌入式 Web UI 静态文件。解析 18+ 种文件扩展名的 MIME 类型，防止路径遍历攻击，设置缓存控制头。 |
 | `HttpResponseHelper` | 构建 JSON、文本和错误响应的工具类，自动添加 Content-Type 和 CORS 头。 |
 | `APIRoutes` | 在初始化时将所有 API 端点注册到路由器。 |
 | `HealthHandler` | `GET /api/health` — 返回 JVM 状态、PID、运行时间和内存信息。 |
@@ -197,8 +199,9 @@ Can-Set-Native-Method-Prefix: true
 - 选择 Netty 是因为其极小的内存占用和零外部依赖
 - 运行在独立线程池上，避免干扰应用程序
 - Agent 通过反射（`Class.forName`）加载 Server，避免循环编译依赖
-- WebSocket 支持计划用于实时日志流和实时方法追踪（Phase 6）
+- WebSocket 支持计划用于实时日志流和实时方法追踪（后续增强）
 - API 端点遵循 RESTful 约定，统一在 `/api/` 路径下
+- 通过 `StaticFileHandler` 提供静态文件服务，实现嵌入式 Web UI，无需独立前端服务器
 
 ### joltvm-cli
 
@@ -213,14 +216,40 @@ Can-Set-Native-Method-Prefix: true
 
 ### joltvm-ui
 
-*（Phase 6 — 尚未实现）*
+*（Phase 6 — 已实现为嵌入式 Web UI）*
 
-React + TypeScript 单页应用，提供浏览器端 IDE 体验。计划组件：
+Web UI 并非使用独立的 React/TypeScript 项目，而是以原生 HTML + CSS + JavaScript 文件的形式嵌入到 `joltvm-server/src/main/resources/webui/` 中。这种零构建方式确保 Agent JAR 完全自包含，无需 Node.js 构建依赖。
 
-- **Monaco Editor** — 代码编辑，支持语法高亮和智能提示
-- **d3-flame-graph** — 交互式火焰图可视化
-- **类/方法树** — 层级类浏览器，支持搜索
-- **审计面板** — 查看热修复历史和 diff
+#### 架构
+
+```
+浏览器 → GET / → HttpDispatcherHandler
+                      │
+                      ├── 匹配 API 路由？ → RouteHandler（JSON 响应）
+                      │
+                      └── 无 API 匹配（GET）？ → StaticFileHandler
+                            │
+                            ├── /           → webui/index.html
+                            ├── /css/*.css  → webui/css/app.css
+                            └── /js/*.js    → webui/js/api.js, app.js
+```
+
+#### 组件
+
+| 文件 | 用途 |
+|------|------|
+| `index.html` | SPA 入口，包含 6 个导航标签（仪表盘、类浏览、热替换、火焰图、Spring、审计日志） |
+| `css/app.css` | 深色主题（Catppuccin Mocha 风格），使用 CSS 自定义属性，覆盖所有视图样式 |
+| `js/api.js` | `JoltAPI` 模块，封装 18+ 个 REST API 端点，使用 `fetch()` |
+| `js/app.js` | 应用逻辑：标签导航、数据渲染、Monaco Editor 集成、d3-flame-graph 可视化 |
+
+#### 关键设计决策
+
+- **嵌入 JAR 中**：Web UI 资源打包在 `src/main/resources/webui/` 下，从 classpath 提供服务 —— 无需独立的 `joltvm-ui` 模块或前端构建步骤
+- **CDN 加载库**：Monaco Editor 和 d3-flame-graph 在运行时从 CDN 加载，保持 JAR 体积小巧
+- **SPA 风格路由**：当 GET 请求没有匹配到 API 路由时，`HttpDispatcherHandler` 回退到 `StaticFileHandler`
+- **路径遍历防护**：`StaticFileHandler` 阻止请求路径中包含 `..` 和 `\`
+- **XSS 防护**：所有用户生成内容在插入 DOM 前通过 `esc()` 工具函数进行转义
 
 ---
 
@@ -514,6 +543,56 @@ JoltVM 能够内省 Spring Boot 应用，**无需任何编译期 Spring 依赖**
 - **依赖链分析**：扫描字段和构造函数参数上的 `@Autowired`、`@Inject`（`jakarta.inject` 和 `javax.inject`）、`@Resource` 注解。递归构建依赖树，支持循环依赖检测。
 - **请求映射解析**：支持 `@RequestMapping`、`@GetMapping`、`@PostMapping`、`@PutMapping`、`@DeleteMapping`、`@PatchMapping`。提取 URL 模式和 HTTP 方法。
 
+### 嵌入式 Web UI
+
+*（Phase 6 — 已实现）*
+
+JoltVM 在 Agent JAR 中内置了一个完整的浏览器端 Web UI。当开发者打开 `http://localhost:7758` 时，Netty 服务器直接从 classpath 提供 Web UI 资源 —— 无需独立的前端构建或部署。
+
+#### 请求路由
+
+```
+HTTP GET 请求
+        │
+        ▼
+┌─────────────────────────┐
+│ HttpDispatcherHandler    │
+│ .channelRead0()          │
+└────────┬────────────────┘
+         │
+         ├── Router.match() ──► API RouteHandler（JSON）
+         │
+         └── 无匹配 + GET ──► StaticFileHandler
+                                    │
+                                    ├── 解析路径（"/" → "index.html"）
+                                    ├── 验证路径（阻止 ".." 和 "\"）
+                                    ├── 从 classpath 读取：webui/{path}
+                                    ├── 解析 Content-Type（18+ 种 MIME 类型）
+                                    ├── 设置 Cache-Control 头
+                                    └── 返回 FullHttpResponse
+```
+
+#### 六个 UI 视图
+
+| 视图 | 数据来源 | 关键特性 |
+|------|---------|---------|
+| **仪表盘** | `/api/health` | JVM 信息、内存使用、运行时间显示 |
+| **类浏览** | `/api/classes`、`/api/classes/{name}/source` | 分页类浏览器、反编译源码查看 |
+| **热替换** | `/api/hotswap`、`/api/rollback` | Monaco Editor (CDN)、编译 + 热替换、回滚 |
+| **火焰图** | `/api/trace/start`、`/api/trace/flamegraph` | d3-flame-graph (CDN)、方法追踪、栈采样 |
+| **Spring** | `/api/spring/beans`、`/api/spring/mappings`、`/api/spring/dependencies` | Bean 浏览器、请求映射、依赖可视化 |
+| **审计日志** | `/api/hotswap/history` | 热替换/回滚历史，带状态徽章 |
+
+#### 静态文件处理器
+
+`StaticFileHandler` 实现了 `RouteHandler` 接口，提供：
+
+- **MIME 类型解析**：将 18+ 种文件扩展名（HTML、CSS、JS、JSON、图片、字体、WASM 等）映射到正确的 `Content-Type` 头
+- **路径遍历防护**：拒绝包含 `..` 或 `\` 的路径，返回 HTTP 400
+- **缓存控制**：HTML 文件使用 `no-cache`（始终获取最新），静态资源（CSS、JS、图片）使用 `max-age=86400`
+- **Classpath 加载**：通过 `ClassLoader.getResourceAsStream()` 从 `webui/` 基础目录读取文件
+- **默认文档**：对 `/` 的请求自动提供 `index.html`
+
 ---
 
 ## 数据流
@@ -600,9 +679,9 @@ JoltVM 的设计目标是最小化对目标应用的影响：
 | 日志 | JUL (`java.util.logging`) | 零依赖 — 对 Agent 启动阶段至关重要 |
 | 构建 | Gradle + Shadow | 多模块构建 + fat JAR 打包 |
 | CI/CD | GitHub Actions | 自动化测试 + Maven Central 发布 |
-| 前端 | React + TypeScript | 现代化、类型安全的 UI 开发 |
-| 代码编辑器 | Monaco Editor | VS Code 的编辑器组件 |
-| 火焰图 | d3-flame-graph | 交互式、可缩放的火焰图 |
+| 前端 | 原生 HTML + CSS + JS | 零构建依赖，嵌入 Agent JAR |
+| 代码编辑器 | Monaco Editor (CDN) | VS Code 的编辑器组件，按需加载 |
+| 火焰图 | d3-flame-graph (CDN) | 交互式、可缩放的火焰图 |
 
 ---
 
@@ -628,13 +707,13 @@ joltvm/
 │           ├── InstrumentationHolderTest.java
 │           └── AttachHelperTest.java       # 15 个测试（PID 验证等）
 │
-├── joltvm-server/                  # ── 嵌入式 Web 服务器（Phase 2–5）──
+├── joltvm-server/                  # ── 嵌入式 Web 服务器（Phase 2–6）──
 │   ├── build.gradle.kts
 │   └── src/
 │       ├── main/java/com/joltvm/server/
 │       │   ├── JoltVMServer.java           # Netty HTTP 服务器生命周期
 │       │   ├── HttpRouter.java             # 路径模式匹配 + 参数
-│       │   ├── HttpDispatcherHandler.java  # 请求分发 + CORS
+│       │   ├── HttpDispatcherHandler.java  # 请求分发 + CORS + 静态文件回退
 │       │   ├── HttpResponseHelper.java     # JSON/文本响应构建器
 │       │   ├── RouteHandler.java           # 函数式路由处理器接口
 │       │   ├── APIRoutes.java              # API 路由注册（18 个路由）
@@ -652,6 +731,7 @@ joltvm/
 │       │   │   ├── TraceListHandler.java   # GET /api/trace/records
 │       │   │   ├── TraceFlameGraphHandler.java # GET /api/trace/flamegraph
 │       │   │   ├── TraceStatusHandler.java # GET /api/trace/status
+│       │   │   ├── StaticFileHandler.java  # 提供嵌入式 Web UI 静态文件
 │       │   │   ├── BeanListHandler.java    # GET /api/spring/beans
 │       │   │   ├── BeanDetailHandler.java  # GET /api/spring/beans/{beanName}
 │       │   │   ├── RequestMappingHandler.java # GET /api/spring/mappings
@@ -679,6 +759,12 @@ joltvm/
 │       │   │   ├── SpringContextService.java # Spring 上下文发现 + Bean 分析
 │       │   │   └── package-info.java
 │       │   └── package-info.java
+│       ├── main/resources/webui/            # ── 嵌入式 Web UI 资源 ──
+│       │   ├── index.html                   # SPA 入口（6 个视图）
+│       │   ├── css/app.css                  # 深色主题样式
+│       │   └── js/
+│       │       ├── api.js                   # REST API 客户端模块
+│       │       └── app.js                   # 应用逻辑 + UI 渲染
 │       └── test/java/com/joltvm/server/
 │           ├── HttpRouterTest.java
 │           ├── HttpResponseHelperTest.java
@@ -701,7 +787,8 @@ joltvm/
 │           │   ├── BeanDetailHandlerTest.java
 │           │   ├── RequestMappingHandlerTest.java
 │           │   ├── DependencyChainHandlerTest.java
-│           │   └── DependencyGraphHandlerTest.java
+│           │   ├── DependencyGraphHandlerTest.java
+│           │   └── StaticFileHandlerTest.java  # 18 个测试（MIME 类型、服务、安全）
 │           ├── compile/
 │           │   └── InMemoryCompilerTest.java
 │           ├── decompile/
@@ -753,7 +840,7 @@ joltvm/
 | **Phase 3** | 热替换 + 回滚 | `redefineClasses()`、`javax.tools.JavaCompiler` | ✅ 已完成 |
 | **Phase 4** | 方法追踪 + 火焰图数据 | Byte Buddy Advice、栈采样 | ✅ 已完成 |
 | **Phase 5** | Spring Boot 感知 | Spring `ApplicationContext`、`RequestMappingHandlerMapping` | ✅ 已完成 |
-| **Phase 6** | Web UI | React、Monaco Editor、d3-flame-graph | 📋 计划中 |
+| **Phase 6** | Web UI | 原生 JS、Monaco Editor (CDN)、d3-flame-graph (CDN) | ✅ 已完成 |
 
 ---
 

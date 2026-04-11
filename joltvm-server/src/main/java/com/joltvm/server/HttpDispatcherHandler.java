@@ -29,6 +29,7 @@ import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.QueryStringDecoder;
 
+import java.util.Collections;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -38,15 +39,24 @@ import java.util.logging.Logger;
  *
  * <p>Handles CORS preflight (OPTIONS) requests automatically and provides
  * error handling for unmatched routes and handler exceptions.
+ *
+ * <p>When no API route matches a GET request, the handler falls back to
+ * the optional static file handler (Web UI) if one is configured.
  */
 final class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
 
     private static final Logger LOG = Logger.getLogger(HttpDispatcherHandler.class.getName());
 
     private final HttpRouter router;
+    private final RouteHandler staticFileHandler;
 
     HttpDispatcherHandler(HttpRouter router) {
+        this(router, null);
+    }
+
+    HttpDispatcherHandler(HttpRouter router, RouteHandler staticFileHandler) {
         this.router = router;
+        this.staticFileHandler = staticFileHandler;
     }
 
     @Override
@@ -70,6 +80,19 @@ final class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpRe
         // Route matching
         HttpRouter.RouteMatch match = router.match(request.method(), path);
         if (match == null) {
+            // Fallback to static file handler for GET requests (Web UI)
+            if (staticFileHandler != null && request.method().equals(HttpMethod.GET)) {
+                try {
+                    // Extract file path: strip leading "/" to get relative path
+                    String filePath = path.length() > 1 ? path.substring(1) : "";
+                    FullHttpResponse response = staticFileHandler.handle(request,
+                            filePath.isEmpty() ? Collections.emptyMap() : Collections.singletonMap("filePath", filePath));
+                    sendResponse(ctx, request, response);
+                    return;
+                } catch (Exception e) {
+                    LOG.log(Level.WARNING, "Error serving static file: " + path, e);
+                }
+            }
             FullHttpResponse response = HttpResponseHelper.notFound(
                     "No route found for " + request.method() + " " + path);
             sendResponse(ctx, request, response);

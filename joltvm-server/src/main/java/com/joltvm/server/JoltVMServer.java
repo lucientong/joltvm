@@ -28,6 +28,8 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.stream.ChunkedWriteHandler;
 
+import com.joltvm.server.handler.StaticFileHandler;
+
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
@@ -68,6 +70,7 @@ public final class JoltVMServer {
 
     private final int port;
     private final HttpRouter router;
+    private final StaticFileHandler staticFileHandler;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     private EventLoopGroup bossGroup;
@@ -93,6 +96,7 @@ public final class JoltVMServer {
         }
         this.port = port;
         this.router = new HttpRouter();
+        this.staticFileHandler = new StaticFileHandler();
     }
 
     /**
@@ -125,7 +129,7 @@ public final class JoltVMServer {
                                     new HttpServerCodec(),
                                     new HttpObjectAggregator(MAX_CONTENT_LENGTH),
                                     new ChunkedWriteHandler(),
-                                    new HttpDispatcherHandler(router)
+                                    new HttpDispatcherHandler(router, staticFileHandler)
                             );
                         }
                     });

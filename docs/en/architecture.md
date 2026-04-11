@@ -20,6 +20,7 @@ This document provides a deep dive into JoltVM's architecture, module design, an
   - [Class Hot-Swap & Rollback](#class-hot-swap--rollback)
   - [Method Tracing & Flame Graph](#method-tracing--flame-graph)
   - [Spring Boot Awareness](#spring-boot-awareness)
+  - [Embedded Web UI](#embedded-web-ui)
 - [Data Flow](#data-flow)
 - [Thread Model](#thread-model)
 - [Security Model](#security-model)
@@ -147,7 +148,8 @@ The embedded HTTP server module, based on Netty 4.x, that runs inside the target
 |-------|---------------|
 | `JoltVMServer` | Netty HTTP server lifecycle management (start/stop). Boss group (1 thread) + Worker group (2 threads). Default port 7758, configurable. Idempotent start/stop with `AtomicBoolean`. |
 | `HttpRouter` | Path pattern matching with `{paramName}` support via regex compilation. Routes matched in registration order, first match wins. |
-| `HttpDispatcherHandler` | Netty `SimpleChannelInboundHandler` that dispatches requests to `RouteHandler` via `HttpRouter`. Handles CORS preflight (OPTIONS) and error handling. |
+| `HttpDispatcherHandler` | Netty `SimpleChannelInboundHandler` that dispatches requests to `RouteHandler` via `HttpRouter`. Handles CORS preflight (OPTIONS), static file fallback, and error handling. |
+| `StaticFileHandler` | Serves embedded Web UI static files from classpath `webui/` directory. Resolves MIME types for 18+ file extensions, prevents path traversal attacks, and sets cache control headers. |
 | `HttpResponseHelper` | Utility class for building JSON, text, and error responses with proper Content-Type and CORS headers. |
 | `APIRoutes` | Registers all API endpoints on the router during initialization. |
 | `HealthHandler` | `GET /api/health` — Returns JVM status, PID, uptime, and memory info. |
@@ -198,8 +200,9 @@ The embedded HTTP server module, based on Netty 4.x, that runs inside the target
 - Netty is chosen for its minimal footprint and zero external dependencies
 - Runs on a dedicated thread pool to avoid interfering with the application
 - Agent loads server via reflection (`Class.forName`) to avoid circular compile-time dependency
-- WebSocket support planned for real-time log streaming and live method tracing (Phase 6)
+- WebSocket support planned for real-time log streaming and live method tracing (future enhancement)
 - API endpoints follow a RESTful convention under `/api/`
+- Static file serving via `StaticFileHandler` provides an embedded Web UI without a separate frontend server
 
 ### joltvm-cli
 
@@ -214,14 +217,40 @@ A command-line tool packaged as a fat JAR (via Shadow plugin). It provides two c
 
 ### joltvm-ui
 
-*(Phase 6 — not yet implemented)*
+*(Phase 6 — Implemented as embedded Web UI)*
 
-A React + TypeScript single-page application that provides a browser-based IDE experience. Planned components:
+Rather than a separate React/TypeScript project, the Web UI is implemented as vanilla HTML + CSS + JavaScript files embedded in `joltvm-server/src/main/resources/webui/`. This zero-build approach ensures the agent JAR is fully self-contained with no Node.js build dependency.
 
-- **Monaco Editor** — Code editing with syntax highlighting and IntelliSense
-- **d3-flame-graph** — Interactive flame graph visualization
-- **Class/Method Tree** — Hierarchical class browser with search
-- **Audit Dashboard** — View hot-fix history with diffs
+#### Architecture
+
+```
+Browser → GET / → HttpDispatcherHandler
+                      │
+                      ├── Match API route? → RouteHandler (JSON response)
+                      │
+                      └── No API match (GET)? → StaticFileHandler
+                            │
+                            ├── /           → webui/index.html
+                            ├── /css/*.css  → webui/css/app.css
+                            └── /js/*.js    → webui/js/api.js, app.js
+```
+
+#### Components
+
+| File | Purpose |
+|------|---------|
+| `index.html` | SPA entry point with 6 navigation tabs (Dashboard, Classes, Hot-Swap, Flame Graph, Spring, Audit Log) |
+| `css/app.css` | Dark theme (Catppuccin Mocha-inspired) with CSS custom properties, styles for all views |
+| `js/api.js` | `JoltAPI` module wrapping all 18+ REST API endpoints using `fetch()` |
+| `js/app.js` | Application logic: tab navigation, data rendering, Monaco Editor integration, d3-flame-graph visualization |
+
+#### Key Design Decisions
+
+- **Embedded in JAR**: Web UI assets are packaged under `src/main/resources/webui/` and served from classpath — no separate `joltvm-ui` module or frontend build step needed
+- **CDN-loaded libraries**: Monaco Editor and d3-flame-graph are loaded from CDN at runtime, keeping the JAR size small
+- **SPA-style routing**: `HttpDispatcherHandler` falls back to `StaticFileHandler` when no API route matches a GET request
+- **Path traversal protection**: `StaticFileHandler` blocks `..` and `\` in requested paths
+- **XSS prevention**: All user-generated content is escaped via the `esc()` utility function before DOM insertion
 
 ---
 
@@ -515,6 +544,56 @@ Target JVM with Spring Boot
 - **Dependency chain analysis**: Scans `@Autowired`, `@Inject` (`jakarta.inject` and `javax.inject`), and `@Resource` annotations on fields and constructor parameters. Recursively builds the dependency tree with circular dependency detection.
 - **Request mapping parsing**: Supports `@RequestMapping`, `@GetMapping`, `@PostMapping`, `@PutMapping`, `@DeleteMapping`, `@PatchMapping`. Extracts URL patterns and HTTP methods.
 
+### Embedded Web UI
+
+*(Phase 6 — Implemented)*
+
+JoltVM ships a fully embedded browser-based Web UI inside the agent JAR. When a developer opens `http://localhost:7758`, the Netty server serves the Web UI assets directly from the classpath — no separate frontend build or deployment required.
+
+#### Request Routing
+
+```
+HTTP GET request
+        │
+        ▼
+┌─────────────────────────┐
+│ HttpDispatcherHandler    │
+│ .channelRead0()          │
+└────────┬────────────────┘
+         │
+         ├── Router.match() ──► API RouteHandler (JSON)
+         │
+         └── No match + GET ──► StaticFileHandler
+                                    │
+                                    ├── Resolve path ("/" → "index.html")
+                                    ├── Validate path (block ".." and "\")
+                                    ├── Read from classpath: webui/{path}
+                                    ├── Resolve Content-Type (18+ MIME types)
+                                    ├── Set Cache-Control headers
+                                    └── Return FullHttpResponse
+```
+
+#### Six UI Views
+
+| View | Data Source | Key Features |
+|------|------------|--------------|
+| **Dashboard** | `/api/health` | JVM info, memory usage, uptime display |
+| **Classes** | `/api/classes`, `/api/classes/{name}/source` | Paginated class browser, decompiled source viewer |
+| **Hot-Swap** | `/api/hotswap`, `/api/rollback` | Monaco Editor (CDN), compile + hot-swap, rollback |
+| **Flame Graph** | `/api/trace/start`, `/api/trace/flamegraph` | d3-flame-graph (CDN), method tracing, stack sampling |
+| **Spring** | `/api/spring/beans`, `/api/spring/mappings`, `/api/spring/dependencies` | Bean browser, request mappings, dependency visualization |
+| **Audit Log** | `/api/hotswap/history` | Hot-swap/rollback history with status badges |
+
+#### Static File Handler
+
+`StaticFileHandler` implements the `RouteHandler` interface and provides:
+
+- **MIME type resolution**: Maps 18+ file extensions (HTML, CSS, JS, JSON, images, fonts, WASM, etc.) to proper `Content-Type` headers
+- **Path traversal protection**: Rejects any path containing `..` or `\` with HTTP 400
+- **Cache control**: `no-cache` for HTML files (always fresh), `max-age=86400` for static assets (CSS, JS, images)
+- **Classpath loading**: Reads files from `webui/` base directory via `ClassLoader.getResourceAsStream()`
+- **Default document**: Requests to `/` are automatically served as `index.html`
+
 ---
 
 ## Data Flow
@@ -601,9 +680,9 @@ JoltVM is designed to minimize impact on the target application:
 | Logging | JUL (`java.util.logging`) | Zero dependencies — critical for agent bootstrap |
 | Build | Gradle + Shadow | Multi-module builds + fat JAR packaging |
 | CI/CD | GitHub Actions | Automated testing + Maven Central publishing |
-| Frontend | React + TypeScript | Modern, type-safe UI development |
-| Code editor | Monaco Editor | VS Code's editor component |
-| Flame graph | d3-flame-graph | Interactive, zoomable flame graphs |
+| Frontend | Vanilla HTML + CSS + JS | Zero build dependency, embedded in agent JAR |
+| Code editor | Monaco Editor (CDN) | VS Code's editor component, loaded on-demand |
+| Flame graph | d3-flame-graph (CDN) | Interactive, zoomable flame graphs |
 
 ---
 
@@ -629,13 +708,13 @@ joltvm/
 │           ├── InstrumentationHolderTest.java
 │           └── AttachHelperTest.java       # 15 tests (PID validation, etc.)
 │
-├── joltvm-server/                  # ── Embedded Web Server (Phase 2–5) ──
+├── joltvm-server/                  # ── Embedded Web Server (Phase 2–6) ──
 │   ├── build.gradle.kts
 │   └── src/
 │       ├── main/java/com/joltvm/server/
 │       │   ├── JoltVMServer.java           # Netty HTTP server lifecycle
 │       │   ├── HttpRouter.java             # Path pattern matching + params
-│       │   ├── HttpDispatcherHandler.java  # Request dispatch + CORS
+│       │   ├── HttpDispatcherHandler.java  # Request dispatch + CORS + static fallback
 │       │   ├── HttpResponseHelper.java     # JSON/text response builder
 │       │   ├── RouteHandler.java           # Functional route handler interface
 │       │   ├── APIRoutes.java              # API route registration (18 routes)
@@ -653,6 +732,7 @@ joltvm/
 │       │   │   ├── TraceListHandler.java   # GET /api/trace/records
 │       │   │   ├── TraceFlameGraphHandler.java # GET /api/trace/flamegraph
 │       │   │   ├── TraceStatusHandler.java # GET /api/trace/status
+│       │   │   ├── StaticFileHandler.java  # Serves embedded Web UI static files
 │       │   │   ├── BeanListHandler.java    # GET /api/spring/beans
 │       │   │   ├── BeanDetailHandler.java  # GET /api/spring/beans/{beanName}
 │       │   │   ├── RequestMappingHandler.java # GET /api/spring/mappings
@@ -680,6 +760,12 @@ joltvm/
 │       │   │   ├── SpringContextService.java # Spring context discovery + bean analysis
 │       │   │   └── package-info.java
 │       │   └── package-info.java
+│       ├── main/resources/webui/            # ── Embedded Web UI Assets ──
+│       │   ├── index.html                   # SPA entry point (6 views)
+│       │   ├── css/app.css                  # Dark theme styles
+│       │   └── js/
+│       │       ├── api.js                   # REST API client module
+│       │       └── app.js                   # Application logic + UI rendering
 │       └── test/java/com/joltvm/server/
 │           ├── HttpRouterTest.java
 │           ├── HttpResponseHelperTest.java
@@ -702,7 +788,8 @@ joltvm/
 │           │   ├── BeanDetailHandlerTest.java
 │           │   ├── RequestMappingHandlerTest.java
 │           │   ├── DependencyChainHandlerTest.java
-│           │   └── DependencyGraphHandlerTest.java
+│           │   ├── DependencyGraphHandlerTest.java
+│           │   └── StaticFileHandlerTest.java  # 18 tests (MIME types, serving, security)
 │           ├── compile/
 │           │   └── InMemoryCompilerTest.java
 │           ├── decompile/
@@ -754,7 +841,7 @@ joltvm/
 | **Phase 3** | Hot-swap + rollback | `redefineClasses()`, `javax.tools.JavaCompiler` | ✅ Complete |
 | **Phase 4** | Method tracing + flame graph data | Byte Buddy Advice, stack sampling | ✅ Complete |
 | **Phase 5** | Spring Boot awareness | Spring `ApplicationContext`, `RequestMappingHandlerMapping` | ✅ Complete |
-| **Phase 6** | Web UI | React, Monaco Editor, d3-flame-graph | 📋 Planned |
+| **Phase 6** | Web UI | Vanilla JS, Monaco Editor (CDN), d3-flame-graph (CDN) | ✅ Complete |
 
 ---
 

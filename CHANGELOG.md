@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-11
+
+### Added
+- **Web UI** (`StaticFileHandler`) — Browser-based Web IDE served from embedded Netty, no separate frontend server required
+- **Dashboard** — Real-time JVM health monitoring with memory usage bars, uptime, PID, and quick stats
+- **Class Browser** — Paginated class list with package/search filtering, click-to-view detail panel (fields, methods, modifiers, interfaces)
+- **Hot-Swap Editor** — Monaco Editor integration (loaded from CDN) for editing Java source code with syntax highlighting; one-click hot-swap and rollback buttons
+- **Interactive Flame Graph** — d3-flame-graph visualization (loaded from CDN) with zoomable, searchable flame charts; supports both method tracing and stack sampling data
+- **Spring Boot Panel** — Bean list, request mappings, and dependency graph views with stereotype badges and method badges
+- **Audit Log View** — Hot-swap operation history with action type, status, timestamps, and class names
+- **Static File Serving** — MIME type resolution for 18+ file types (HTML, CSS, JS, images, fonts, WASM, etc.), path traversal protection, cache control headers
+- **Dark Theme** — Catppuccin Mocha-inspired dark theme with CSS custom properties, monospace code fonts, responsive layout
+- **Toast Notifications** — Non-intrusive success/error/info notifications for user actions
+- **Fallback Routing** — `HttpDispatcherHandler` now falls back to static file serving for unmatched GET requests, enabling SPA-style routing
+- **18 new tests** — StaticFileHandler content type resolution (11), file serving (5), cache headers (2), content length (1)
+
+### Changed
+- `HttpDispatcherHandler` now accepts optional `StaticFileHandler` for Web UI fallback (backward compatible)
+- `JoltVMServer` creates and injects `StaticFileHandler` into the Netty pipeline
+- Web UI assets (HTML, CSS, JS) embedded in `src/main/resources/webui/` — packaged into the agent JAR
+- Updated project version to 0.6.0
+
 ## [0.5.0] - 2026-04-11
 
 ### Added
