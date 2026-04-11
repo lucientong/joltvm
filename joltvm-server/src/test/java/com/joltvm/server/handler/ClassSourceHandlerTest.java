@@ -54,13 +54,7 @@ class ClassSourceHandlerTest {
 
     @AfterEach
     void tearDown() {
-        try {
-            var resetMethod = InstrumentationHolder.class.getDeclaredMethod("reset");
-            resetMethod.setAccessible(true);
-            resetMethod.invoke(null);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        InstrumentationHolder.reset();
     }
 
     @Test

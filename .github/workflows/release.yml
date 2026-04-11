@@ -5,6 +5,9 @@
 # Central via Sonatype Central Portal, and creates a GitHub Release with the
 # shadow JARs attached.
 #
+# IMPORTANT: Tests are NOT run here. They are already validated by the CI
+# workflow on every push to master. Only push a tag after CI is green.
+#
 # Required GitHub Secrets:
 #   MAVEN_CENTRAL_USERNAME  — Sonatype Central Portal user token username
 #   MAVEN_CENTRAL_PASSWORD  — Sonatype Central Portal user token password
@@ -30,7 +33,7 @@ permissions:
 
 jobs:
   # ===========================================================================
-  # Job 1: Build, test, publish to Maven Central
+  # Job 1: Build (no tests), publish to Maven Central
   # ===========================================================================
   publish:
     name: Publish to Maven Central
@@ -72,8 +75,8 @@ jobs:
             exit 1
           fi
 
-      - name: Build and test
-        run: ./gradlew build --no-daemon
+      - name: Build (tests skipped — already verified by CI)
+        run: ./gradlew build -x test --no-daemon
 
       - name: Publish to Maven Central (Sonatype Central Portal)
         run: ./gradlew publishToSonatype closeAndReleaseSonatypeStagingRepository --no-daemon

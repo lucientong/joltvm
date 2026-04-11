@@ -20,6 +20,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.net.ServerSocket;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -30,9 +33,19 @@ class JoltVMServerTest {
     private JoltVMServer server;
 
     @AfterEach
-    void tearDown() {
+    void tearDown() throws Exception {
         if (server != null) {
             server.stop();
+            // Allow time for the OS to release the port
+            Thread.sleep(200);
+        }
+    }
+
+    /** Returns a random available port by binding to port 0. */
+    private static int findAvailablePort() throws IOException {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            socket.setReuseAddress(true);
+            return socket.getLocalPort();
         }
     }
 
@@ -78,8 +91,8 @@ class JoltVMServerTest {
     @Test
     @DisplayName("server starts and stops successfully")
     void startAndStop() throws Exception {
-        // Use a random high port to avoid conflicts
-        server = new JoltVMServer(0 + 18758);
+        int port = findAvailablePort();
+        server = new JoltVMServer(port);
         server.start();
         assertTrue(server.isRunning());
 
@@ -90,7 +103,8 @@ class JoltVMServerTest {
     @Test
     @DisplayName("double start is idempotent")
     void doubleStartIsIdempotent() throws Exception {
-        server = new JoltVMServer(18759);
+        int port = findAvailablePort();
+        server = new JoltVMServer(port);
         server.start();
         // Should not throw
         server.start();
@@ -100,7 +114,8 @@ class JoltVMServerTest {
     @Test
     @DisplayName("double stop is safe")
     void doubleStopIsSafe() throws Exception {
-        server = new JoltVMServer(18760);
+        int port = findAvailablePort();
+        server = new JoltVMServer(port);
         server.start();
         server.stop();
         // Should not throw

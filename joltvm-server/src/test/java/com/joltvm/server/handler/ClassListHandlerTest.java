@@ -55,14 +55,7 @@ class ClassListHandlerTest {
 
     @AfterEach
     void tearDown() {
-        // Reset InstrumentationHolder for other tests
-        try {
-            var resetMethod = InstrumentationHolder.class.getDeclaredMethod("reset");
-            resetMethod.setAccessible(true);
-            resetMethod.invoke(null);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        InstrumentationHolder.reset();
     }
 
     @Test

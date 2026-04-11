@@ -195,7 +195,11 @@ public final class JoltVMServer {
     private static void shutdown(EventLoopGroup... groups) {
         for (EventLoopGroup group : groups) {
             if (group != null) {
-                group.shutdownGracefully();
+                try {
+                    group.shutdownGracefully().sync();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
         }
     }

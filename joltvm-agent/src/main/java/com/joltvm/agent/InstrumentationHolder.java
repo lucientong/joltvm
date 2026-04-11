@@ -97,7 +97,7 @@ public final class InstrumentationHolder {
      * <p><b>WARNING:</b> This method is intended for testing purposes only.
      * Do not call in production code.
      */
-    static void reset() {
+    public static void reset() {
         INSTANCE.set(null);
     }
 }
