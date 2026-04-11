@@ -139,7 +139,7 @@ public final class JoltVMAgent {
             LOG.info(String.format("Agent arguments: %s", agentArgs));
         }
 
-        // Phase 2 — Start embedded Netty web server (loaded via reflection to avoid circular deps)
+        // Start embedded Netty web server (loaded via reflection to avoid circular deps)
         Map<String, String> parsedArgs = parseArgs(agentArgs);
         int port;
         try {
@@ -150,7 +150,9 @@ public final class JoltVMAgent {
         }
         startServer(port);
 
-        // TODO: Phase 5 — Detect and inspect Spring context
+        // Spring Boot awareness is handled by SpringContextService
+        // (lazy discovery when /api/spring/* endpoints are first accessed)
+        LOG.info("Spring Boot awareness enabled (lazy detection on first API access)");
     }
 
     /**

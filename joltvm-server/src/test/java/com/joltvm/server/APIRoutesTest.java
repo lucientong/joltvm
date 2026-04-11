@@ -81,6 +81,16 @@ class APIRoutesTest {
     }
 
     @Test
+    @DisplayName("Spring Boot awareness endpoints are registered")
+    void springEndpoints() {
+        assertNotNull(router.match(HttpMethod.GET, "/api/spring/beans"));
+        assertNotNull(router.match(HttpMethod.GET, "/api/spring/beans/myBean"));
+        assertNotNull(router.match(HttpMethod.GET, "/api/spring/mappings"));
+        assertNotNull(router.match(HttpMethod.GET, "/api/spring/dependencies"));
+        assertNotNull(router.match(HttpMethod.GET, "/api/spring/dependencies/myBean"));
+    }
+
+    @Test
     @DisplayName("unregistered paths return null")
     void unregisteredPathsReturnNull() {
         assertNull(router.match(HttpMethod.GET, "/api/unknown"));

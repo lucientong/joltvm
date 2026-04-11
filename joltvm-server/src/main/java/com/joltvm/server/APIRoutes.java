@@ -16,19 +16,25 @@
 
 package com.joltvm.server;
 
+import com.joltvm.server.handler.BeanDetailHandler;
+import com.joltvm.server.handler.BeanListHandler;
 import com.joltvm.server.handler.ClassDetailHandler;
 import com.joltvm.server.handler.ClassListHandler;
 import com.joltvm.server.handler.ClassSourceHandler;
 import com.joltvm.server.handler.CompileHandler;
+import com.joltvm.server.handler.DependencyChainHandler;
+import com.joltvm.server.handler.DependencyGraphHandler;
 import com.joltvm.server.handler.HealthHandler;
 import com.joltvm.server.handler.HotSwapHandler;
 import com.joltvm.server.handler.HotSwapHistoryHandler;
+import com.joltvm.server.handler.RequestMappingHandler;
 import com.joltvm.server.handler.RollbackHandler;
 import com.joltvm.server.handler.TraceFlameGraphHandler;
 import com.joltvm.server.handler.TraceHandler;
 import com.joltvm.server.handler.TraceListHandler;
 import com.joltvm.server.handler.TraceStatusHandler;
 import com.joltvm.server.hotswap.HotSwapService;
+import com.joltvm.server.spring.SpringContextService;
 import com.joltvm.server.tracing.MethodTraceService;
 import io.netty.handler.codec.http.HttpMethod;
 
@@ -53,7 +59,7 @@ public final class APIRoutes {
     private static final Logger LOG = Logger.getLogger(APIRoutes.class.getName());
 
     /** Total number of registered API endpoints. */
-    static final int ROUTE_COUNT = 13;
+    static final int ROUTE_COUNT = 18;
 
     private APIRoutes() {
         // Utility class — no instantiation
@@ -67,6 +73,8 @@ public final class APIRoutes {
      *   <li>{@link HotSwapService} — shared by HotSwapHandler, RollbackHandler, HotSwapHistoryHandler</li>
      *   <li>{@link MethodTraceService} — shared by TraceHandler, TraceListHandler,
      *       TraceFlameGraphHandler, TraceStatusHandler</li>
+     *   <li>{@link SpringContextService} — shared by BeanListHandler, BeanDetailHandler,
+     *       RequestMappingHandler, DependencyChainHandler, DependencyGraphHandler</li>
      * </ul>
      *
      * @param router the HTTP router to register routes on
@@ -75,6 +83,7 @@ public final class APIRoutes {
         // Shared service singletons
         HotSwapService hotSwapService = new HotSwapService();
         MethodTraceService traceService = new MethodTraceService();
+        SpringContextService springService = new SpringContextService();
 
         router.addRoute(HttpMethod.GET, "/api/health", new HealthHandler());
 
@@ -92,6 +101,12 @@ public final class APIRoutes {
         router.addRoute(HttpMethod.GET, "/api/trace/records", new TraceListHandler(traceService));
         router.addRoute(HttpMethod.GET, "/api/trace/flamegraph", new TraceFlameGraphHandler(traceService));
         router.addRoute(HttpMethod.GET, "/api/trace/status", new TraceStatusHandler(traceService));
+
+        router.addRoute(HttpMethod.GET, "/api/spring/beans", new BeanListHandler(springService));
+        router.addRoute(HttpMethod.GET, "/api/spring/beans/{beanName}", new BeanDetailHandler(springService));
+        router.addRoute(HttpMethod.GET, "/api/spring/mappings", new RequestMappingHandler(springService));
+        router.addRoute(HttpMethod.GET, "/api/spring/dependencies", new DependencyGraphHandler(springService));
+        router.addRoute(HttpMethod.GET, "/api/spring/dependencies/{beanName}", new DependencyChainHandler(springService));
 
         LOG.info("Registered " + ROUTE_COUNT + " API routes");
     }

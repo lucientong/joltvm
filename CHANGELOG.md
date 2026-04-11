@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-11
+
+### Added
+- **Spring Boot Awareness** (`SpringContextService`) — Reflection-based Spring ApplicationContext discovery with zero compile-time Spring dependencies, compatible with Spring Boot 2.x/3.x
+- **Bean List** — List all Spring beans with pagination, package/search/stereotype filtering
+- **Bean Detail** — Inspect individual bean metadata including methods, annotations, interfaces, implemented RequestMappings
+- **Request Mapping** — Parse `@RequestMapping`/`@GetMapping`/`@PostMapping` etc. to display URL → method mappings, with HTTP method and search filtering
+- **Dependency Chain** — Recursive dependency injection analysis for individual beans, detecting `@Autowired`/`@Inject`/`@Resource` annotated fields and constructor parameters, with circular dependency detection
+- **Dependency Graph** — Full `@Controller → @Service → @Repository` dependency graph across all stereotyped beans
+- **REST API: `GET /api/spring/beans`** — List all Spring beans (paginated, filterable by package, search, stereotype)
+- **REST API: `GET /api/spring/beans/{beanName}`** — Spring bean detail (methods, annotations, interfaces, mappings)
+- **REST API: `GET /api/spring/mappings`** — URL → method request mappings (filterable by HTTP method and search)
+- **REST API: `GET /api/spring/dependencies`** — Full dependency graph (Controller→Service→Repository relationships)
+- **REST API: `GET /api/spring/dependencies/{beanName}`** — Dependency chain for a specific bean (recursive, circular-aware)
+- **`StubSpringContextService`** — Test helper subclass enabling comprehensive positive-path testing with injectable mock data
+- **32 new tests** — BeanListHandler (11), BeanDetailHandler (8), RequestMappingHandler (11), DependencyChainHandler (5), DependencyGraphHandler (3), SpringContextService (6), APIRoutes Spring endpoints (1)
+
+### Changed
+- `APIRoutes` now registers 18 routes (was 13): added 5 Spring Boot awareness endpoints
+- `JoltVMAgent` now initializes `SpringContextService` alongside other shared services
+- Updated project version to 0.5.0
+
 ## [0.4.0] - 2026-04-11
 
 ### Added

@@ -19,6 +19,7 @@ This document provides a deep dive into JoltVM's architecture, module design, an
   - [Bytecode Transformation Pipeline](#bytecode-transformation-pipeline)
   - [Class Hot-Swap & Rollback](#class-hot-swap--rollback)
   - [Method Tracing & Flame Graph](#method-tracing--flame-graph)
+  - [Spring Boot Awareness](#spring-boot-awareness)
 - [Data Flow](#data-flow)
 - [Thread Model](#thread-model)
 - [Security Model](#security-model)
@@ -163,6 +164,12 @@ The embedded HTTP server module, based on Netty 4.x, that runs inside the target
 | `TraceListHandler` | `GET /api/trace/records` — Returns recorded method trace entries with configurable limit. |
 | `TraceFlameGraphHandler` | `GET /api/trace/flamegraph` — Returns d3-flame-graph compatible JSON data. |
 | `TraceStatusHandler` | `GET /api/trace/status` — Returns current tracing/sampling state and statistics. |
+| `SpringContextService` | Reflection-based Spring ApplicationContext discovery. Lists beans, parses `@RequestMapping`, analyzes `@Controller → @Service → @Repository` dependency chains. Zero compile-time Spring dependencies. |
+| `BeanListHandler` | `GET /api/spring/beans` — Paginated list of Spring beans with package/search/stereotype filtering. |
+| `BeanDetailHandler` | `GET /api/spring/beans/{beanName}` — Bean detail (methods, annotations, interfaces, mappings). |
+| `RequestMappingHandler` | `GET /api/spring/mappings` — URL → method request mappings with HTTP method and search filtering. |
+| `DependencyChainHandler` | `GET /api/spring/dependencies/{beanName}` — Recursive dependency injection chain for a specific bean. |
+| `DependencyGraphHandler` | `GET /api/spring/dependencies` — Full dependency graph across all stereotyped beans. |
 
 #### REST API Endpoints
 
@@ -181,6 +188,11 @@ The embedded HTTP server module, based on Netty 4.x, that runs inside the target
 | GET | `/api/trace/records` | Recorded method trace entries (with limit) |
 | GET | `/api/trace/flamegraph` | Flame graph data (d3-flame-graph format) |
 | GET | `/api/trace/status` | Current tracing/sampling status |
+| GET | `/api/spring/beans` | List all Spring beans (paginated, filterable) |
+| GET | `/api/spring/beans/{beanName}` | Spring bean detail (methods, annotations, interfaces) |
+| GET | `/api/spring/mappings` | URL → method request mappings |
+| GET | `/api/spring/dependencies` | Full dependency graph (Controller→Service→Repository) |
+| GET | `/api/spring/dependencies/{beanName}` | Dependency chain for a specific bean |
 
 **Design considerations**:
 - Netty is chosen for its minimal footprint and zero external dependencies
@@ -471,6 +483,38 @@ Two data sources feed the flame graph:
 1. **Trace records**: Method-level invocation data from Byte Buddy Advice (preferred when stack samples are unavailable)
 2. **Stack samples**: CPU profile data from periodic `Thread.getAllStackTraces()` calls (preferred when available, as it captures the full call stack)
 
+### Spring Boot Awareness
+
+*(Phase 5 — Implemented)*
+
+JoltVM can introspect Spring Boot applications **without any compile-time Spring dependencies**. All interaction with Spring classes is done purely via reflection, making it compatible with both Spring Boot 2.x and 3.x.
+
+#### Architecture
+
+```
+Target JVM with Spring Boot
+        │
+        ▼
+┌─────────────────────────┐
+│ SpringContextService    │  Discovers ApplicationContext via
+│ .detectSpringContext()   │  Thread.currentThread().getContextClassLoader()
+└────────┬────────────────┘  + reflection on LiveBeansView, WebApplicationContext
+         │
+         ├── listBeans()          → GET /api/spring/beans
+         ├── getBeanDetail()      → GET /api/spring/beans/{beanName}
+         ├── getRequestMappings() → GET /api/spring/mappings
+         ├── getDependencyChain() → GET /api/spring/dependencies/{beanName}
+         └── getDependencyGraph() → GET /api/spring/dependencies
+```
+
+#### Key Design Decisions
+
+- **Zero Spring compile-time dependency**: All Spring classes (`ApplicationContext`, `@RequestMapping`, `@Autowired`, etc.) are accessed via `Class.forName()` and `Method.invoke()`. This ensures the agent JAR doesn't pull in Spring Boot as a transitive dependency.
+- **Graceful degradation**: When attached to a non-Spring JVM, all endpoints return HTTP 503 with `{"springDetected": false}`. No errors or exceptions are thrown.
+- **Stereotype detection**: Recognizes `@Controller`, `@RestController`, `@Service`, `@Repository`, `@Component`, and `@Configuration` annotations for bean classification.
+- **Dependency chain analysis**: Scans `@Autowired`, `@Inject` (`jakarta.inject` and `javax.inject`), and `@Resource` annotations on fields and constructor parameters. Recursively builds the dependency tree with circular dependency detection.
+- **Request mapping parsing**: Supports `@RequestMapping`, `@GetMapping`, `@PostMapping`, `@PutMapping`, `@DeleteMapping`, `@PatchMapping`. Extracts URL patterns and HTTP methods.
+
 ---
 
 ## Data Flow
@@ -585,7 +629,7 @@ joltvm/
 │           ├── InstrumentationHolderTest.java
 │           └── AttachHelperTest.java       # 15 tests (PID validation, etc.)
 │
-├── joltvm-server/                  # ── Embedded Web Server (Phase 2–4) ──
+├── joltvm-server/                  # ── Embedded Web Server (Phase 2–5) ──
 │   ├── build.gradle.kts
 │   └── src/
 │       ├── main/java/com/joltvm/server/
@@ -594,7 +638,7 @@ joltvm/
 │       │   ├── HttpDispatcherHandler.java  # Request dispatch + CORS
 │       │   ├── HttpResponseHelper.java     # JSON/text response builder
 │       │   ├── RouteHandler.java           # Functional route handler interface
-│       │   ├── APIRoutes.java              # API route registration
+│       │   ├── APIRoutes.java              # API route registration (18 routes)
 │       │   ├── handler/
 │       │   │   ├── HealthHandler.java      # GET /api/health
 │       │   │   ├── ClassListHandler.java   # GET /api/classes
@@ -608,7 +652,12 @@ joltvm/
 │       │   │   ├── TraceHandler.java       # POST /api/trace/start, /api/trace/stop
 │       │   │   ├── TraceListHandler.java   # GET /api/trace/records
 │       │   │   ├── TraceFlameGraphHandler.java # GET /api/trace/flamegraph
-│       │   │   └── TraceStatusHandler.java # GET /api/trace/status
+│       │   │   ├── TraceStatusHandler.java # GET /api/trace/status
+│       │   │   ├── BeanListHandler.java    # GET /api/spring/beans
+│       │   │   ├── BeanDetailHandler.java  # GET /api/spring/beans/{beanName}
+│       │   │   ├── RequestMappingHandler.java # GET /api/spring/mappings
+│       │   │   ├── DependencyGraphHandler.java # GET /api/spring/dependencies
+│       │   │   └── DependencyChainHandler.java # GET /api/spring/dependencies/{beanName}
 │       │   ├── compile/
 │       │   │   ├── InMemoryCompiler.java   # javax.tools in-memory compilation
 │       │   │   ├── CompileResult.java      # Compilation result record
@@ -627,6 +676,9 @@ joltvm/
 │       │   │   ├── FlameGraphNode.java     # Flame graph tree node (d3-compatible)
 │       │   │   ├── TraceRecord.java        # Single method invocation record
 │       │   │   └── TracingException.java   # Tracing error
+│       │   ├── spring/
+│       │   │   ├── SpringContextService.java # Spring context discovery + bean analysis
+│       │   │   └── package-info.java
 │       │   └── package-info.java
 │       └── test/java/com/joltvm/server/
 │           ├── HttpRouterTest.java
@@ -645,7 +697,12 @@ joltvm/
 │           │   ├── TraceHandlerTest.java
 │           │   ├── TraceListHandlerTest.java
 │           │   ├── TraceFlameGraphHandlerTest.java
-│           │   └── TraceStatusHandlerTest.java
+│           │   ├── TraceStatusHandlerTest.java
+│           │   ├── BeanListHandlerTest.java
+│           │   ├── BeanDetailHandlerTest.java
+│           │   ├── RequestMappingHandlerTest.java
+│           │   ├── DependencyChainHandlerTest.java
+│           │   └── DependencyGraphHandlerTest.java
 │           ├── compile/
 │           │   └── InMemoryCompilerTest.java
 │           ├── decompile/
@@ -654,11 +711,14 @@ joltvm/
 │           │   ├── HotSwapServiceTest.java
 │           │   ├── BytecodeBackupServiceTest.java
 │           │   └── HotSwapRecordTest.java
-│           └── tracing/
-│               ├── MethodTraceServiceTest.java
-│               ├── FlameGraphCollectorTest.java
-│               ├── FlameGraphNodeTest.java
-│               └── TraceRecordTest.java
+│           ├── tracing/
+│           │   ├── MethodTraceServiceTest.java
+│           │   ├── FlameGraphCollectorTest.java
+│           │   ├── FlameGraphNodeTest.java
+│           │   └── TraceRecordTest.java
+│           └── spring/
+│               ├── SpringContextServiceTest.java
+│               └── StubSpringContextService.java
 │
 ├── joltvm-cli/                     # ── Command-Line Tool ──
 │   ├── build.gradle.kts            # Shadow JAR + processResources for version
@@ -693,7 +753,7 @@ joltvm/
 | **Phase 2** | Netty web server + basic APIs (list classes, decompile) | Netty, CFR | ✅ Complete |
 | **Phase 3** | Hot-swap + rollback | `redefineClasses()`, `javax.tools.JavaCompiler` | ✅ Complete |
 | **Phase 4** | Method tracing + flame graph data | Byte Buddy Advice, stack sampling | ✅ Complete |
-| **Phase 5** | Spring Boot awareness | Spring `ApplicationContext`, `RequestMappingHandlerMapping` | 📋 Planned |
+| **Phase 5** | Spring Boot awareness | Spring `ApplicationContext`, `RequestMappingHandlerMapping` | ✅ Complete |
 | **Phase 6** | Web UI | React, Monaco Editor, d3-flame-graph | 📋 Planned |
 
 ---

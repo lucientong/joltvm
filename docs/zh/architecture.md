@@ -19,6 +19,7 @@
   - [字节码转换流水线](#字节码转换流水线)
   - [类热替换与回滚](#类热替换与回滚)
   - [方法追踪与火焰图](#方法追踪与火焰图)
+  - [Spring Boot 感知](#spring-boot-感知)
 - [数据流](#数据流)
 - [线程模型](#线程模型)
 - [安全模型](#安全模型)
@@ -162,6 +163,12 @@ Can-Set-Native-Method-Prefix: true
 | `TraceListHandler` | `GET /api/trace/records` — 返回方法追踪记录，支持 limit 参数。 |
 | `TraceFlameGraphHandler` | `GET /api/trace/flamegraph` — 返回 d3-flame-graph 兼容的 JSON 数据。 |
 | `TraceStatusHandler` | `GET /api/trace/status` — 返回当前追踪/采样状态和统计信息。 |
+| `SpringContextService` | 基于反射的 Spring ApplicationContext 发现。列出 Bean、解析 `@RequestMapping`、分析 `@Controller → @Service → @Repository` 依赖链。零编译期 Spring 依赖。 |
+| `BeanListHandler` | `GET /api/spring/beans` — 分页列出 Spring Bean，支持包名/搜索/stereotype 过滤。 |
+| `BeanDetailHandler` | `GET /api/spring/beans/{beanName}` — Bean 详情（方法、注解、接口、映射）。 |
+| `RequestMappingHandler` | `GET /api/spring/mappings` — URL → 方法请求映射，支持 HTTP 方法和搜索过滤。 |
+| `DependencyChainHandler` | `GET /api/spring/dependencies/{beanName}` — 单个 Bean 的递归依赖注入链。 |
+| `DependencyGraphHandler` | `GET /api/spring/dependencies` — 所有 stereotype Bean 的完整依赖图。 |
 
 #### REST API 端点
 
@@ -180,6 +187,11 @@ Can-Set-Native-Method-Prefix: true
 | GET | `/api/trace/records` | 方法追踪记录（支持 limit 参数） |
 | GET | `/api/trace/flamegraph` | 火焰图数据（d3-flame-graph 格式） |
 | GET | `/api/trace/status` | 当前追踪/采样状态 |
+| GET | `/api/spring/beans` | 列出所有 Spring Bean（分页、可过滤） |
+| GET | `/api/spring/beans/{beanName}` | Spring Bean 详情（方法、注解、接口） |
+| GET | `/api/spring/mappings` | URL → 方法请求映射 |
+| GET | `/api/spring/dependencies` | 完整依赖图（Controller→Service→Repository） |
+| GET | `/api/spring/dependencies/{beanName}` | 单个 Bean 的依赖链 |
 
 **设计考虑**：
 - 选择 Netty 是因为其极小的内存占用和零外部依赖
@@ -470,6 +482,38 @@ POST /api/trace/start  { "type": "sample", "interval": 10 }
 1. **追踪记录**：来自 Byte Buddy Advice 的方法级调用数据（当栈采样不可用时作为回退）
 2. **栈采样**：来自定期 `Thread.getAllStackTraces()` 调用的 CPU 分析数据（可用时优先使用，因为它捕获完整的调用栈）
 
+### Spring Boot 感知
+
+*（Phase 5 — 已实现）*
+
+JoltVM 能够内省 Spring Boot 应用，**无需任何编译期 Spring 依赖**。所有与 Spring 类的交互都通过反射完成，兼容 Spring Boot 2.x 和 3.x。
+
+#### 架构
+
+```
+运行 Spring Boot 的目标 JVM
+        │
+        ▼
+┌─────────────────────────┐
+│ SpringContextService    │  通过 Thread.currentThread()
+│ .detectSpringContext()   │  .getContextClassLoader() + 反射
+└────────┬────────────────┘  发现 ApplicationContext
+         │
+         ├── listBeans()          → GET /api/spring/beans
+         ├── getBeanDetail()      → GET /api/spring/beans/{beanName}
+         ├── getRequestMappings() → GET /api/spring/mappings
+         ├── getDependencyChain() → GET /api/spring/dependencies/{beanName}
+         └── getDependencyGraph() → GET /api/spring/dependencies
+```
+
+#### 关键设计决策
+
+- **零 Spring 编译期依赖**：所有 Spring 类（`ApplicationContext`、`@RequestMapping`、`@Autowired` 等）都通过 `Class.forName()` 和 `Method.invoke()` 访问。确保 Agent JAR 不会引入 Spring Boot 作为传递依赖。
+- **优雅降级**：当附着到非 Spring JVM 时，所有端点返回 HTTP 503 `{"springDetected": false}`。不抛出错误或异常。
+- **Stereotype 检测**：识别 `@Controller`、`@RestController`、`@Service`、`@Repository`、`@Component` 和 `@Configuration` 注解，用于 Bean 分类。
+- **依赖链分析**：扫描字段和构造函数参数上的 `@Autowired`、`@Inject`（`jakarta.inject` 和 `javax.inject`）、`@Resource` 注解。递归构建依赖树，支持循环依赖检测。
+- **请求映射解析**：支持 `@RequestMapping`、`@GetMapping`、`@PostMapping`、`@PutMapping`、`@DeleteMapping`、`@PatchMapping`。提取 URL 模式和 HTTP 方法。
+
 ---
 
 ## 数据流
@@ -584,7 +628,7 @@ joltvm/
 │           ├── InstrumentationHolderTest.java
 │           └── AttachHelperTest.java       # 15 个测试（PID 验证等）
 │
-├── joltvm-server/                  # ── 嵌入式 Web 服务器（Phase 2–4）──
+├── joltvm-server/                  # ── 嵌入式 Web 服务器（Phase 2–5）──
 │   ├── build.gradle.kts
 │   └── src/
 │       ├── main/java/com/joltvm/server/
@@ -593,7 +637,7 @@ joltvm/
 │       │   ├── HttpDispatcherHandler.java  # 请求分发 + CORS
 │       │   ├── HttpResponseHelper.java     # JSON/文本响应构建器
 │       │   ├── RouteHandler.java           # 函数式路由处理器接口
-│       │   ├── APIRoutes.java              # API 路由注册
+│       │   ├── APIRoutes.java              # API 路由注册（18 个路由）
 │       │   ├── handler/
 │       │   │   ├── HealthHandler.java      # GET /api/health
 │       │   │   ├── ClassListHandler.java   # GET /api/classes
@@ -607,7 +651,12 @@ joltvm/
 │       │   │   ├── TraceHandler.java       # POST /api/trace/start, /api/trace/stop
 │       │   │   ├── TraceListHandler.java   # GET /api/trace/records
 │       │   │   ├── TraceFlameGraphHandler.java # GET /api/trace/flamegraph
-│       │   │   └── TraceStatusHandler.java # GET /api/trace/status
+│       │   │   ├── TraceStatusHandler.java # GET /api/trace/status
+│       │   │   ├── BeanListHandler.java    # GET /api/spring/beans
+│       │   │   ├── BeanDetailHandler.java  # GET /api/spring/beans/{beanName}
+│       │   │   ├── RequestMappingHandler.java # GET /api/spring/mappings
+│       │   │   ├── DependencyGraphHandler.java # GET /api/spring/dependencies
+│       │   │   └── DependencyChainHandler.java # GET /api/spring/dependencies/{beanName}
 │       │   ├── compile/
 │       │   │   ├── InMemoryCompiler.java   # javax.tools 内存中编译
 │       │   │   ├── CompileResult.java      # 编译结果 record
@@ -626,6 +675,9 @@ joltvm/
 │       │   │   ├── FlameGraphNode.java     # 火焰图树节点（d3 兼容）
 │       │   │   ├── TraceRecord.java        # 单次方法调用记录
 │       │   │   └── TracingException.java   # 追踪异常
+│       │   ├── spring/
+│       │   │   ├── SpringContextService.java # Spring 上下文发现 + Bean 分析
+│       │   │   └── package-info.java
 │       │   └── package-info.java
 │       └── test/java/com/joltvm/server/
 │           ├── HttpRouterTest.java
@@ -644,20 +696,28 @@ joltvm/
 │           │   ├── TraceHandlerTest.java
 │           │   ├── TraceListHandlerTest.java
 │           │   ├── TraceFlameGraphHandlerTest.java
-│           │   └── TraceStatusHandlerTest.java
+│           │   ├── TraceStatusHandlerTest.java
+│           │   ├── BeanListHandlerTest.java
+│           │   ├── BeanDetailHandlerTest.java
+│           │   ├── RequestMappingHandlerTest.java
+│           │   ├── DependencyChainHandlerTest.java
+│           │   └── DependencyGraphHandlerTest.java
 │           ├── compile/
-│           │   └── InMemoryCompilerTest.java   # 8 个测试
+│           │   └── InMemoryCompilerTest.java
 │           ├── decompile/
 │           │   └── DecompileServiceTest.java
 │           ├── hotswap/
 │           │   ├── HotSwapServiceTest.java
 │           │   ├── BytecodeBackupServiceTest.java
 │           │   └── HotSwapRecordTest.java
-│           └── tracing/
-│               ├── MethodTraceServiceTest.java
-│               ├── FlameGraphCollectorTest.java
-│               ├── FlameGraphNodeTest.java
-│               └── TraceRecordTest.java
+│           ├── tracing/
+│           │   ├── MethodTraceServiceTest.java
+│           │   ├── FlameGraphCollectorTest.java
+│           │   ├── FlameGraphNodeTest.java
+│           │   └── TraceRecordTest.java
+│           └── spring/
+│               ├── SpringContextServiceTest.java
+│               └── StubSpringContextService.java
 │
 ├── joltvm-cli/                     # ── 命令行工具 ──
 │   ├── build.gradle.kts            # Shadow JAR + processResources 版本注入
@@ -692,7 +752,7 @@ joltvm/
 | **Phase 2** | Netty Web Server + 基础 API（列出类、反编译） | Netty、CFR | ✅ 已完成 |
 | **Phase 3** | 热替换 + 回滚 | `redefineClasses()`、`javax.tools.JavaCompiler` | ✅ 已完成 |
 | **Phase 4** | 方法追踪 + 火焰图数据 | Byte Buddy Advice、栈采样 | ✅ 已完成 |
-| **Phase 5** | Spring Boot 感知 | Spring `ApplicationContext`、`RequestMappingHandlerMapping` | 📋 计划中 |
+| **Phase 5** | Spring Boot 感知 | Spring `ApplicationContext`、`RequestMappingHandlerMapping` | ✅ 已完成 |
 | **Phase 6** | Web UI | React、Monaco Editor、d3-flame-graph | 📋 计划中 |
 
 ---

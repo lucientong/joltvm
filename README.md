@@ -17,7 +17,7 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ## ✨ Features
 
-> JoltVM is under active development. Phase 1 (Agent skeleton + Attach API), Phase 2 (Netty Web Server + REST APIs), and Phase 3 (Hot-Swap + Rollback) are complete. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 (Agent skeleton + Attach API), Phase 2 (Netty Web Server + REST APIs), Phase 3 (Hot-Swap + Rollback), Phase 4 (Method Tracing + Flame Graph), and Phase 5 (Spring Boot Awareness) are complete. See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, real-time log streaming, and class/method tree navigation. Edit code and apply hot-fixes visually.
@@ -29,7 +29,7 @@ Edit code in Web IDE → auto-compile → instant class swap via `Instrumentatio
 Zoomable, searchable flame graphs in the browser (d3-flame-graph). Toggle between CPU time, wall time, and allocation views. Side-by-side comparison for before/after optimization.
 
 ### 🌱 Spring Boot Awareness
-List all `@RestController` endpoints with URL mappings. Trace complete call chains from URL to database. Inspect any Spring Bean's current field values. Hot-fix Spring components without restart.
+List all Spring beans with filtering and pagination. Parse `@RequestMapping` endpoints with URL → method mappings. Analyze `@Controller → @Service → @Repository` dependency injection chains with circular dependency detection. Zero compile-time Spring dependencies — works via reflection with Spring Boot 2.x/3.x.
 
 ### 🔒 Security Audit
 Role-based access control (viewer/operator/admin). Every hot-fix generates a diff with timestamp, user, and reason. Optional approval workflow. Immutable, exportable audit logs.
@@ -101,7 +101,7 @@ JoltVM consists of four modules (see [Architecture Doc](docs/en/architecture.md)
 | Module | Description | Status |
 |--------|-------------|--------|
 | `joltvm-agent` | Java Agent core — premain/agentmain entry, Instrumentation management, Attach API | ✅ Phase 1 |
-| `joltvm-server` | Embedded Netty HTTP server with REST APIs (class list, detail, decompile, hot-swap, tracing) | ✅ Phase 2–4 |
+| `joltvm-server` | Embedded Netty HTTP server with REST APIs (class list, detail, decompile, hot-swap, tracing, Spring awareness) | ✅ Phase 2–5 |
 | `joltvm-cli` | Command-line tool for attaching agent to running JVM processes | ✅ Phase 1 |
 | `joltvm-ui` | React + TypeScript Web IDE frontend | 📋 Phase 6 |
 
@@ -115,13 +115,13 @@ JoltVM consists of four modules (see [Architecture Doc](docs/en/architecture.md)
 <dependency>
     <groupId>io.github.lucientong</groupId>
     <artifactId>joltvm-agent</artifactId>
-    <version>0.2.0</version>
+    <version>0.5.0</version>
 </dependency>
 ```
 
 ```kotlin
 // Gradle Kotlin DSL
-implementation("io.github.lucientong:joltvm-agent:0.2.0")
+implementation("io.github.lucientong:joltvm-agent:0.5.0")
 ```
 
 ---
@@ -132,7 +132,7 @@ implementation("io.github.lucientong:joltvm-agent:0.2.0")
 - [x] **Phase 2**: Netty Web Server + basic APIs (list classes, decompile source)
 - [x] **Phase 3**: Hot-swap (compile → redefineClasses) + rollback
 - [x] **Phase 4**: Method tracing (Byte Buddy Advice) + flame graph data
-- [ ] **Phase 5**: Spring Boot awareness (Bean list, URL mapping)
+- [x] **Phase 5**: Spring Boot awareness (Bean list, URL mapping, dependency chains)
 - [ ] **Phase 6**: Web UI (Monaco Editor + flame graph + real-time logs)
 
 ---

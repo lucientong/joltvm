@@ -36,6 +36,11 @@
  *   <li>{@code GET  /api/trace/records} — Trace records</li>
  *   <li>{@code GET  /api/trace/flamegraph} — Flame graph data (d3-flame-graph format)</li>
  *   <li>{@code GET  /api/trace/status} — Tracing status</li>
+ *   <li>{@code GET  /api/spring/beans} — List all Spring beans (paginated, filterable)</li>
+ *   <li>{@code GET  /api/spring/beans/{beanName}} — Spring bean detail</li>
+ *   <li>{@code GET  /api/spring/mappings} — URL → method request mappings</li>
+ *   <li>{@code GET  /api/spring/dependencies} — Full dependency graph (Controller→Service→Repository)</li>
+ *   <li>{@code GET  /api/spring/dependencies/{beanName}} — Dependency chain for a specific bean</li>
  * </ul>
  *
  * @see com.joltvm.server.JoltVMServer
