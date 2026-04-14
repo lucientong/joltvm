@@ -150,13 +150,14 @@ class TokenServiceTest {
     class TokenInvalidation {
 
         @Test
-        @DisplayName("invalidated token still validates (signature-based)")
+        @DisplayName("invalidated token is rejected by revocation list")
         void invalidateToken() {
             String token = tokenService.generateToken("admin", Role.ADMIN);
             assertNotNull(tokenService.validateToken(token));
             tokenService.invalidateToken(token);
-            // Note: token still validates via signature since we don't maintain a deny-list
-            // The activeTokens check allows tokens that pass signature verification
+            // Token must be rejected after invalidation — revocation list enforces this
+            assertNull(tokenService.validateToken(token),
+                    "Revoked token must not be accepted even if HMAC signature is still valid");
         }
 
         @Test

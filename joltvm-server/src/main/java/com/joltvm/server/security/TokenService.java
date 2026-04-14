@@ -55,6 +55,16 @@ public final class TokenService {
     private final Map<String, String> activeTokens = new ConcurrentHashMap<>();
 
     /**
+     * Revoked tokens → expiration time.
+     * Tokens added here are always rejected, even if the signature is valid.
+     * Entries are cleaned up lazily once they pass their expiration time.
+     */
+    private final Map<String, Instant> revokedTokens = new ConcurrentHashMap<>();
+
+    /** Cleanup counter — triggers revocation cleanup every 100 validation calls. */
+    private int validateCallCount = 0;
+
+    /**
      * Creates a token service with a random secret key and default expiration.
      */
     public TokenService() {
@@ -106,15 +116,24 @@ public final class TokenService {
     /**
      * Validates a token and returns the token info if valid.
      *
+     * <p>Checks the revocation list first: any token passed to
+     * {@link #invalidateToken(String)} or {@link #invalidateAllTokens(String)} is
+     * permanently rejected, even if its HMAC signature is still valid.
+     *
      * @param token the token string
-     * @return the token info, or {@code null} if the token is invalid or expired
+     * @return the token info, or {@code null} if the token is invalid, expired, or revoked
      */
     public TokenInfo validateToken(String token) {
         if (token == null || token.isBlank()) return null;
 
-        // Check if token has been invalidated
-        if (!activeTokens.containsKey(token)) {
-            // Token might still be valid (server restart) — verify signature
+        // Lazily clean up expired revocation entries
+        if (++validateCallCount % 100 == 0) {
+            cleanupExpiredRevocations();
+        }
+
+        // Hard revocation check — rejected regardless of signature validity
+        if (revokedTokens.containsKey(token)) {
+            return null;
         }
 
         String[] parts = token.split("\\.", 2);
@@ -161,13 +180,20 @@ public final class TokenService {
     }
 
     /**
-     * Invalidates a token (logout).
+     * Invalidates (revokes) a token immediately.
+     *
+     * <p>The token is added to the revocation list so that subsequent calls to
+     * {@link #validateToken(String)} will return {@code null}, even if the
+     * HMAC signature is still valid and the token has not yet expired.
      *
      * @param token the token to invalidate
      */
     public void invalidateToken(String token) {
         if (token != null) {
             activeTokens.remove(token);
+            Instant expiry = parseExpiration(token);
+            revokedTokens.put(token,
+                    expiry != null ? expiry : Instant.now().plusSeconds(expirationSeconds));
         }
     }
 
@@ -177,7 +203,41 @@ public final class TokenService {
      * @param username the username whose tokens to invalidate
      */
     public void invalidateAllTokens(String username) {
-        activeTokens.entrySet().removeIf(e -> e.getValue().equals(username));
+        activeTokens.entrySet().removeIf(entry -> {
+            if (entry.getValue().equals(username)) {
+                Instant expiry = parseExpiration(entry.getKey());
+                revokedTokens.put(entry.getKey(),
+                        expiry != null ? expiry : Instant.now().plusSeconds(expirationSeconds));
+                return true;
+            }
+            return false;
+        });
+    }
+
+    /**
+     * Parses the expiration instant from a token's payload without full validation.
+     *
+     * @param token the token string
+     * @return the expiration instant, or {@code null} if the token cannot be parsed
+     */
+    private Instant parseExpiration(String token) {
+        try {
+            String[] parts = token.split("\\.", 2);
+            if (parts.length != 2) return null;
+            String payload = new String(
+                    Base64.getUrlDecoder().decode(parts[0]), StandardCharsets.UTF_8);
+            String[] fields = payload.split(":", 3);
+            if (fields.length != 3) return null;
+            return Instant.ofEpochSecond(Long.parseLong(fields[2]));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Removes expired entries from the revocation list. */
+    private void cleanupExpiredRevocations() {
+        Instant now = Instant.now();
+        revokedTokens.entrySet().removeIf(e -> now.isAfter(e.getValue()));
     }
 
     /**

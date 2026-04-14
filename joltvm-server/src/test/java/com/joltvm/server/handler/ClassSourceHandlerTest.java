@@ -174,7 +174,7 @@ class ClassSourceHandlerTest {
 
         assertEquals(HttpResponseStatus.INTERNAL_SERVER_ERROR, response.status());
         String body = response.content().toString(StandardCharsets.UTF_8);
-        assertTrue(body.contains("Failed to decompile class"));
+        assertTrue(body.contains("Failed to decompile"));
 
         response.release();
         request.release();

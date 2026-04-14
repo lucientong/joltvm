@@ -96,6 +96,30 @@ subprojects {
         }
     }
 
+    // Enforce minimum coverage thresholds — gate on CI to prevent regressions
+    tasks.named<JacocoCoverageVerification>("jacocoTestCoverageVerification") {
+        dependsOn(tasks.withType<JacocoReport>())
+        violationRules {
+            rule {
+                limit {
+                    counter = "LINE"
+                    value = "COVEREDRATIO"
+                    minimum = "0.70".toBigDecimal()
+                }
+                limit {
+                    counter = "BRANCH"
+                    value = "COVEREDRATIO"
+                    minimum = "0.60".toBigDecimal()
+                }
+            }
+        }
+    }
+
+    // Wire coverage check into the standard check lifecycle
+    tasks.named("check") {
+        dependsOn(tasks.named("jacocoTestCoverageVerification"))
+    }
+
     dependencies {
         // Testing
         "testImplementation"(platform("org.junit:junit-bom:${property("junitVersion")}"))

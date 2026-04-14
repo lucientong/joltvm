@@ -18,6 +18,7 @@ package com.joltvm.server.handler;
 
 import com.joltvm.server.HttpResponseHelper;
 import com.joltvm.server.RouteHandler;
+import com.joltvm.server.security.LoginRateLimiter;
 import com.joltvm.server.security.SecurityConfig;
 import com.joltvm.server.security.TokenService;
 import io.netty.handler.codec.http.FullHttpRequest;
@@ -30,6 +31,9 @@ import java.util.Map;
 
 /**
  * Handler for {@code POST /api/auth/login} — authenticates user and returns a token.
+ *
+ * <p>Applies IP-based rate limiting: after {@link LoginRateLimiter#MAX_FAILURES} failures
+ * within a 5-minute window, further attempts from the same IP receive HTTP 429.
  *
  * <p>Expects a JSON request body:
  * <pre>
@@ -45,7 +49,8 @@ import java.util.Map;
  *   "token": "...",
  *   "username": "admin",
  *   "role": "ADMIN",
- *   "expiresIn": 86400
+ *   "authEnabled": true,
+ *   "changePasswordRequired": false
  * }
  * </pre>
  */
@@ -53,10 +58,17 @@ public class LoginHandler implements RouteHandler {
 
     private final SecurityConfig securityConfig;
     private final TokenService tokenService;
+    private final LoginRateLimiter rateLimiter;
 
     public LoginHandler(SecurityConfig securityConfig, TokenService tokenService) {
+        this(securityConfig, tokenService, new LoginRateLimiter());
+    }
+
+    public LoginHandler(SecurityConfig securityConfig, TokenService tokenService,
+                        LoginRateLimiter rateLimiter) {
         this.securityConfig = securityConfig;
         this.tokenService = tokenService;
+        this.rateLimiter = rateLimiter;
     }
 
     @Override
@@ -68,8 +80,17 @@ public class LoginHandler implements RouteHandler {
             response.put("username", "anonymous");
             response.put("role", "ADMIN");
             response.put("authEnabled", false);
+            response.put("changePasswordRequired", false);
             response.put("message", "Authentication is disabled");
             return HttpResponseHelper.json(response);
+        }
+
+        // Rate limit check
+        String clientIp = pathParams.getOrDefault("_ip", "unknown");
+        if (rateLimiter.isBlocked(clientIp)) {
+            return HttpResponseHelper.error(
+                    HttpResponseStatus.valueOf(429),
+                    "Too many failed login attempts. Please try again in 5 minutes.");
         }
 
         String body = request.content().toString(StandardCharsets.UTF_8);
@@ -83,7 +104,7 @@ public class LoginHandler implements RouteHandler {
             bodyMap = HttpResponseHelper.gson().fromJson(body, Map.class);
         } catch (Exception e) {
             return HttpResponseHelper.error(HttpResponseStatus.BAD_REQUEST,
-                    "Invalid JSON body: " + e.getMessage());
+                    "Invalid JSON in request body.");
         }
 
         String username = (String) bodyMap.get("username");
@@ -100,10 +121,12 @@ public class LoginHandler implements RouteHandler {
 
         SecurityConfig.UserEntry user = securityConfig.authenticate(username, password);
         if (user == null) {
+            rateLimiter.recordFailure(clientIp);
             return HttpResponseHelper.error(HttpResponseStatus.UNAUTHORIZED,
                     "Invalid username or password");
         }
 
+        rateLimiter.recordSuccess(clientIp);
         String token = tokenService.generateToken(user.username(), user.role());
 
         Map<String, Object> response = new LinkedHashMap<>();
@@ -111,6 +134,7 @@ public class LoginHandler implements RouteHandler {
         response.put("username", user.username());
         response.put("role", user.role().name());
         response.put("authEnabled", true);
+        response.put("changePasswordRequired", user.passwordChangeRequired());
         return HttpResponseHelper.json(response);
     }
 }

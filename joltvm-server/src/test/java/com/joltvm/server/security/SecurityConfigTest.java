@@ -54,13 +54,24 @@ class SecurityConfigTest {
         }
 
         @Test
-        @DisplayName("default admin user exists")
+        @DisplayName("default admin user exists with hashed password")
         void defaultAdminExists() {
             SecurityConfig.UserEntry admin = config.getUser("admin");
             assertNotNull(admin);
             assertEquals("admin", admin.username());
-            assertEquals("joltvm", admin.password());
+            // Password is stored as a salted hash, never plain text
+            assertNotEquals("joltvm", admin.passwordHash());
+            assertTrue(admin.passwordHash().contains("$"), "Hash should be in salt$hash format");
             assertEquals(Role.ADMIN, admin.role());
+        }
+
+        @Test
+        @DisplayName("default admin has passwordChangeRequired = true")
+        void defaultAdminPasswordChangeRequired() {
+            SecurityConfig.UserEntry admin = config.getUser("admin");
+            assertNotNull(admin);
+            assertTrue(admin.passwordChangeRequired(),
+                    "Default password 'joltvm' should require a change");
         }
     }
 

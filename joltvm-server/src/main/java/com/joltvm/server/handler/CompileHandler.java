@@ -89,7 +89,7 @@ public class CompileHandler implements RouteHandler {
             bodyMap = HttpResponseHelper.gson().fromJson(body, Map.class);
         } catch (Exception e) {
             return HttpResponseHelper.error(HttpResponseStatus.BAD_REQUEST,
-                    "Invalid JSON body: " + e.getMessage());
+                    "Invalid JSON in request body.");
         }
 
         String className = (String) bodyMap.get("className");

@@ -44,6 +44,8 @@ import com.joltvm.server.spring.SpringContextService;
 import com.joltvm.server.tracing.MethodTraceService;
 import io.netty.handler.codec.http.HttpMethod;
 
+import java.nio.file.Paths;
+import java.util.Map;
 import java.util.logging.Logger;
 
 /**
@@ -68,9 +70,22 @@ public final class APIRoutes {
     static final int ROUTE_COUNT = 21;
 
     private static volatile AuditLogService auditLogServiceInstance;
+    private static volatile MethodTraceService traceServiceInstance;
 
     private APIRoutes() {
         // Utility class — no instantiation
+    }
+
+    /**
+     * Returns the shared {@link MethodTraceService} singleton.
+     *
+     * <p>Available after {@link #registerAll} has been called. Returns {@code null} if
+     * routes have not been registered yet.
+     *
+     * @return the trace service, or {@code null}
+     */
+    public static MethodTraceService getTraceService() {
+        return traceServiceInstance;
     }
 
     /**
@@ -94,11 +109,28 @@ public final class APIRoutes {
      * @param router the HTTP router to register routes on
      */
     public static void registerAll(HttpRouter router) {
-        registerAll(router, new SecurityConfig(), new TokenService());
+        registerAll(router, new SecurityConfig(), new TokenService(), Map.of());
     }
 
     /**
-     * Registers all API endpoints on the given router with security support.
+     * Registers all API endpoints with security support and no extra configuration.
+     *
+     * @param router         the HTTP router to register routes on
+     * @param securityConfig the security configuration
+     * @param tokenService   the token service
+     */
+    public static void registerAll(HttpRouter router, SecurityConfig securityConfig,
+                                   TokenService tokenService) {
+        registerAll(router, securityConfig, tokenService, Map.of());
+    }
+
+    /**
+     * Registers all API endpoints on the given router with full configuration support.
+     *
+     * <p>Reads the following agent argument keys from {@code agentArgs}:
+     * <ul>
+     *   <li>{@code auditFile} — path for persistent JSON Lines audit log (optional)</li>
+     * </ul>
      *
      * <p>Creates shared service instances and wires them into the appropriate handlers:
      * <ul>
@@ -107,21 +139,28 @@ public final class APIRoutes {
      *       TraceFlameGraphHandler, TraceStatusHandler</li>
      *   <li>{@link SpringContextService} — shared by BeanListHandler, BeanDetailHandler,
      *       RequestMappingHandler, DependencyChainHandler, DependencyGraphHandler</li>
-     *   <li>{@link AuditLogService} — shared by AuditExportHandler</li>
+     *   <li>{@link AuditLogService} — shared by AuditExportHandler; persists to {@code auditFile}
+     *       when provided, otherwise memory-only</li>
      *   <li>{@link SecurityConfig} + {@link TokenService} — shared by LoginHandler, AuthStatusHandler</li>
      * </ul>
      *
      * @param router         the HTTP router to register routes on
      * @param securityConfig the security configuration
      * @param tokenService   the token service
+     * @param agentArgs      agent argument map (may be empty, never null)
      */
     public static void registerAll(HttpRouter router, SecurityConfig securityConfig,
-                                   TokenService tokenService) {
+                                   TokenService tokenService, Map<String, String> agentArgs) {
         // Shared service singletons
         HotSwapService hotSwapService = new HotSwapService();
         MethodTraceService traceService = new MethodTraceService();
+        traceServiceInstance = traceService;
         SpringContextService springService = new SpringContextService();
-        AuditLogService auditLogService = new AuditLogService();
+
+        String auditFilePath = agentArgs.get("auditFile");
+        AuditLogService auditLogService = auditFilePath != null
+                ? new AuditLogService(Paths.get(auditFilePath))
+                : AuditLogService.createWithDefaultPath();
         auditLogServiceInstance = auditLogService;
 
         router.addRoute(HttpMethod.GET, "/api/health", new HealthHandler());

@@ -38,6 +38,15 @@ public class BytecodeBackupService {
     private static final Logger LOG = Logger.getLogger(BytecodeBackupService.class.getName());
 
     /**
+     * Maximum number of classes whose bytecode can be backed up simultaneously.
+     *
+     * <p>Prevents unbounded memory growth when many classes are hot-swapped without
+     * being rolled back. Once the limit is reached, new hot-swap operations are rejected
+     * with a {@link HotSwapException} until existing backups are released via rollback.
+     */
+    public static final int MAX_BACKUPS = 100;
+
+    /**
      * Map of className → original bytecode (before hot-swap).
      */
     private final ConcurrentHashMap<String, byte[]> backupStore = new ConcurrentHashMap<>();
@@ -51,7 +60,7 @@ public class BytecodeBackupService {
      *
      * @param clazz the class to back up
      * @return {@code true} if a new backup was created, {@code false} if already backed up
-     * @throws HotSwapException if the bytecode cannot be read
+     * @throws HotSwapException if the bytecode cannot be read or the backup limit is reached
      */
     public boolean backup(Class<?> clazz) {
         String className = clazz.getName();
@@ -60,6 +69,12 @@ public class BytecodeBackupService {
         if (backupStore.containsKey(className)) {
             LOG.fine("Bytecode already backed up for " + className);
             return false;
+        }
+
+        if (backupStore.size() >= MAX_BACKUPS) {
+            throw new HotSwapException(
+                    "Backup limit reached (" + MAX_BACKUPS + " classes). Roll back existing "
+                            + "hot-swaps before applying new ones to free backup slots.");
         }
 
         byte[] bytecode = loadBytecode(clazz);
@@ -74,11 +89,18 @@ public class BytecodeBackupService {
      * @param className the fully qualified class name
      * @param bytecode  the bytecode to back up
      * @return {@code true} if a new backup was created, {@code false} if already backed up
+     * @throws HotSwapException if the backup limit is reached
      */
     public boolean backup(String className, byte[] bytecode) {
         if (backupStore.containsKey(className)) {
             LOG.fine("Bytecode already backed up for " + className);
             return false;
+        }
+
+        if (backupStore.size() >= MAX_BACKUPS) {
+            throw new HotSwapException(
+                    "Backup limit reached (" + MAX_BACKUPS + " classes). Roll back existing "
+                            + "hot-swaps before applying new ones to free backup slots.");
         }
 
         backupStore.putIfAbsent(className, bytecode.clone());

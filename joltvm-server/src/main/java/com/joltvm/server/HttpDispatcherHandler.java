@@ -33,7 +33,11 @@ import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.QueryStringDecoder;
 
+import java.net.InetSocketAddress;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -45,12 +49,18 @@ import java.util.logging.Logger;
  * token-based authentication and RBAC when security is enabled, and provides
  * error handling for unmatched routes and handler exceptions.
  *
+ * <p>Injects a synthetic {@code "_ip"} path parameter with the client's remote
+ * IP address so handlers (e.g., {@code LoginHandler}) can perform IP-based checks.
+ *
  * <p>When no API route matches a GET request, the handler falls back to
  * the optional static file handler (Web UI) if one is configured.
  */
 final class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
 
     private static final Logger LOG = Logger.getLogger(HttpDispatcherHandler.class.getName());
+
+    /** Synthetic path-param key carrying the client remote IP. Handlers access it via {@code pathParams.get("_ip")}. */
+    static final String REMOTE_IP_PARAM = "_ip";
 
     private final HttpRouter router;
     private final RouteHandler staticFileHandler;
@@ -77,10 +87,13 @@ final class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpRe
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) {
         // Handle CORS preflight
         if (request.method().equals(HttpMethod.OPTIONS)) {
-            FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.NO_CONTENT);
+            FullHttpResponse response = new DefaultFullHttpResponse(
+                    HttpVersion.HTTP_1_1, HttpResponseStatus.NO_CONTENT);
             response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-            response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, PUT, DELETE, OPTIONS");
-            response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type, Authorization");
+            response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS,
+                    "GET, POST, PUT, DELETE, OPTIONS");
+            response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS,
+                    "Content-Type, Authorization");
             response.headers().set(HttpHeaderNames.ACCESS_CONTROL_MAX_AGE, "3600");
             response.headers().setInt(HttpHeaderNames.CONTENT_LENGTH, 0);
             sendResponse(ctx, request, response);
@@ -90,6 +103,9 @@ final class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpRe
         // Extract path without query string
         QueryStringDecoder decoder = new QueryStringDecoder(request.uri());
         String path = decoder.path();
+
+        // Extract client IP for rate limiting and audit
+        String remoteIp = extractRemoteIp(ctx, request);
 
         // ── Authentication & Authorization ──
         if (securityConfig != null && securityConfig.isEnabled()) {
@@ -131,10 +147,11 @@ final class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpRe
             // Fallback to static file handler for GET requests (Web UI)
             if (staticFileHandler != null && request.method().equals(HttpMethod.GET)) {
                 try {
-                    // Extract file path: strip leading "/" to get relative path
                     String filePath = path.length() > 1 ? path.substring(1) : "";
                     FullHttpResponse response = staticFileHandler.handle(request,
-                            filePath.isEmpty() ? Collections.emptyMap() : Collections.singletonMap("filePath", filePath));
+                            filePath.isEmpty()
+                                    ? Collections.emptyMap()
+                                    : Collections.singletonMap("filePath", filePath));
                     sendResponse(ctx, request, response);
                     return;
                 } catch (Exception e) {
@@ -147,14 +164,21 @@ final class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpRe
             return;
         }
 
+        // Inject synthetic IP param so handlers can use it for rate limiting / audit
+        Map<String, String> enrichedParams = new HashMap<>(match.pathParams());
+        enrichedParams.put(REMOTE_IP_PARAM, remoteIp);
+
         // Execute handler
         try {
-            FullHttpResponse response = match.handler().handle(request, match.pathParams());
+            FullHttpResponse response = match.handler().handle(request, enrichedParams);
             sendResponse(ctx, request, response);
         } catch (Exception e) {
-            LOG.log(Level.SEVERE, "Error handling request: " + request.method() + " " + path, e);
+            String errorId = UUID.randomUUID().toString();
+            LOG.log(Level.SEVERE,
+                    "Error handling request [errorId=" + errorId + "]: "
+                            + request.method() + " " + path, e);
             FullHttpResponse response = HttpResponseHelper.serverError(
-                    "Internal server error: " + e.getMessage());
+                    "Internal server error (id: " + errorId + ")");
             sendResponse(ctx, request, response);
         }
     }
@@ -165,13 +189,30 @@ final class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpRe
         ctx.close();
     }
 
-    private void sendResponse(ChannelHandlerContext ctx, FullHttpRequest request, FullHttpResponse response) {
+    private void sendResponse(ChannelHandlerContext ctx, FullHttpRequest request,
+                              FullHttpResponse response) {
         boolean keepAlive = HttpUtil.isKeepAlive(request);
         if (keepAlive) {
             response.headers().set(HttpHeaderNames.CONNECTION, "keep-alive");
             ctx.writeAndFlush(response);
         } else {
             ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+        }
+    }
+
+    /**
+     * Extracts the client IP, preferring {@code X-Forwarded-For} when behind a proxy.
+     */
+    private static String extractRemoteIp(ChannelHandlerContext ctx, FullHttpRequest request) {
+        String xff = request.headers().get("X-Forwarded-For");
+        if (xff != null && !xff.isBlank()) {
+            return xff.split(",")[0].trim();
+        }
+        try {
+            InetSocketAddress addr = (InetSocketAddress) ctx.channel().remoteAddress();
+            return addr != null ? addr.getAddress().getHostAddress() : "unknown";
+        } catch (Exception e) {
+            return "unknown";
         }
     }
 }

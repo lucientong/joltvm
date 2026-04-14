@@ -71,7 +71,7 @@ public class RollbackHandler implements RouteHandler {
             bodyMap = HttpResponseHelper.gson().fromJson(body, Map.class);
         } catch (Exception e) {
             return HttpResponseHelper.error(HttpResponseStatus.BAD_REQUEST,
-                    "Invalid JSON body: " + e.getMessage());
+                    "Invalid JSON in request body.");
         }
 
         String className = (String) bodyMap.get("className");
@@ -108,8 +108,7 @@ public class RollbackHandler implements RouteHandler {
 
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Rollback error for " + className, e);
-            return HttpResponseHelper.error(HttpResponseStatus.INTERNAL_SERVER_ERROR,
-                    "Rollback error: " + e.getMessage());
+            return HttpResponseHelper.serverError("Rollback failed due to an internal error.");
         }
     }
 

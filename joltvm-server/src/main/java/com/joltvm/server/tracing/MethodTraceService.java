@@ -18,6 +18,7 @@ package com.joltvm.server.tracing;
 
 import com.joltvm.agent.InstrumentationHolder;
 import net.bytebuddy.agent.builder.AgentBuilder;
+import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
@@ -96,6 +97,14 @@ public class MethodTraceService {
     private volatile ScheduledFuture<?> samplingFuture;
     private volatile ScheduledFuture<?> samplingStopFuture;
     private volatile String currentTraceTarget;
+
+    /**
+     * Holds the {@link ResettableClassFileTransformer} returned by the last
+     * {@code AgentBuilder.installOn()} call. Used in {@link #stopTrace()} to properly
+     * remove the Byte Buddy Advice transformer from the JVM so classes are not
+     * permanently instrumented after tracing stops.
+     */
+    private volatile ResettableClassFileTransformer resettableTransformer;
 
     /** Shared storage for trace records from the Advice callback. */
     private static volatile FlameGraphCollector activeCollector;
@@ -222,7 +231,7 @@ public class MethodTraceService {
                 methodMatcher = ElementMatchers.named(effectiveMethod);
             }
 
-            new AgentBuilder.Default()
+            resettableTransformer = new AgentBuilder.Default()
                     .disableClassFormatChanges()
                     .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
                     .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
@@ -255,11 +264,10 @@ public class MethodTraceService {
     }
 
     /**
-     * Stops the currently active method trace.
+     * Stops the currently active method trace and removes the Byte Buddy Advice transformer.
      *
-     * <p>Note: The Byte Buddy transformation remains in the JVM until the class
-     * is retransformed. The trace is logically stopped by setting the active collector
-     * to null, which causes the Advice callback to skip recording.
+     * <p>Calls {@link ResettableClassFileTransformer#reset} to properly uninstall the
+     * transformer so that traced classes no longer carry the injected Advice bytecode.
      */
     public void stopTrace() {
         if (!tracing.compareAndSet(true, false)) {
@@ -274,26 +282,36 @@ public class MethodTraceService {
             traceStopFuture = null;
         }
 
-        // Retransform traced classes to remove Advice (best effort)
-        if (InstrumentationHolder.isAvailable()) {
-            Instrumentation inst = InstrumentationHolder.get();
-            for (String className : tracedClasses) {
-                try {
-                    for (Class<?> clazz : inst.getAllLoadedClasses()) {
-                        if (clazz.getName().equals(className) && inst.isModifiableClass(clazz)) {
-                            inst.retransformClasses(clazz);
-                            LOG.fine("Retransformed class: " + className);
-                            break;
-                        }
-                    }
-                } catch (Exception e) {
-                    LOG.log(Level.WARNING, "Failed to retransform class: " + className, e);
-                }
+        // Use the ResettableClassFileTransformer to properly remove the Advice transformer
+        ResettableClassFileTransformer transformer = resettableTransformer;
+        resettableTransformer = null;
+        if (transformer != null && InstrumentationHolder.isAvailable()) {
+            try {
+                transformer.reset(InstrumentationHolder.get(),
+                        AgentBuilder.RedefinitionStrategy.RETRANSFORMATION);
+                LOG.info("Byte Buddy Advice transformer removed for: " + currentTraceTarget);
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Failed to reset Byte Buddy transformer", e);
             }
         }
 
         tracedClasses.clear();
         currentTraceTarget = null;
+    }
+
+    /**
+     * Stops all active tracing and sampling without clearing collected data.
+     *
+     * <p>Called by {@link com.joltvm.server.JoltVMServer#stop()} during server shutdown
+     * to release Byte Buddy transformers and sampling scheduler threads.
+     */
+    public void stopAll() {
+        stopTrace();
+        stopSampling();
+        if (scheduler != null && !scheduler.isShutdown()) {
+            scheduler.shutdownNow();
+            scheduler = null;
+        }
     }
 
     /**

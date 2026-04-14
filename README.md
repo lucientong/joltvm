@@ -26,7 +26,7 @@ No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Edito
 Edit code in Web IDE → auto-compile → instant class swap via `Instrumentation.redefineClasses()`. No manual `jad` → `mc` → `retransform` workflow. Built-in rollback with original bytecode preservation.
 
 ### 🔥 Interactive Flame Graphs
-Zoomable, searchable flame graphs in the browser (d3-flame-graph). Toggle between CPU time, wall time, and allocation views. Side-by-side comparison for before/after optimization.
+Zoomable, searchable flame graphs in the browser (d3-flame-graph). Toggle between CPU time and wall time views. Allocation view and side-by-side comparison are **planned**.
 
 ### 🌱 Spring Boot Awareness
 List all Spring beans with filtering and pagination. Parse `@RequestMapping` endpoints with URL → method mappings. Analyze `@Controller → @Service → @Repository` dependency injection chains with circular dependency detection. Zero compile-time Spring dependencies — works via reflection with Spring Boot 2.x/3.x.
@@ -62,7 +62,21 @@ java -jar joltvm-cli/build/libs/joltvm-cli-*-all.jar attach <pid>
 
 # Or use -javaagent for startup attachment
 java -javaagent:joltvm-agent/build/libs/joltvm-agent-*-all.jar -jar your-app.jar
+
+# With custom configuration (comma-separated key=value pairs)
+java -javaagent:joltvm-agent/build/libs/joltvm-agent-*-all.jar=port=7758,security=true,adminPassword=MySecret,auditFile=/var/log/joltvm-audit.jsonl -jar your-app.jar
 ```
+
+### Agent Arguments
+
+| Argument        | Default                            | Description                                                  |
+|-----------------|-------------------------------------|--------------------------------------------------------------|
+| `port`          | `7758`                              | TCP port for the embedded web server                        |
+| `security`      | `false`                             | Enable authentication (`true` / `false`)                   |
+| `adminPassword` | `joltvm`                            | Initial admin password (stored as salted SHA-256 hash). When using the default, you will be prompted to change it on first login. |
+| `auditFile`     | `$TMPDIR/joltvm-audit.jsonl`        | Path for the persistent JSON Lines audit log               |
+| `tlsCert`       | *(none)*                            | Path to TLS certificate (PEM) — enables HTTPS when set    |
+| `tlsKey`        | *(none)*                            | Path to TLS private key (PEM) — required when `tlsCert` is set |
 
 ---
 

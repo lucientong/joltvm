@@ -228,7 +228,8 @@ class HttpDispatcherHandlerTest {
 
             assertEquals(HttpResponseStatus.INTERNAL_SERVER_ERROR, response.status());
             String body = response.content().toString(StandardCharsets.UTF_8);
-            assertTrue(body.contains("Simulated failure"));
+            // Since P1.3 error sanitization, exception details are not exposed to client
+            assertTrue(body.contains("Internal server error"));
         }
 
         @Test

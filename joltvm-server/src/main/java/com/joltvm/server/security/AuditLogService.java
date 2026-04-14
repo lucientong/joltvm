@@ -23,6 +23,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -36,37 +38,64 @@ import java.util.logging.Logger;
 /**
  * Service for persisting and exporting audit logs.
  *
- * <p>Maintains an in-memory audit log (for fast access) and optionally
- * appends entries to a file for persistence across JVM restarts.
+ * <p>Maintains an in-memory audit log (for fast access) and appends entries to a
+ * JSON Lines file for persistence across JVM restarts.
  *
- * <p>The audit log file format is JSON Lines (one JSON object per line),
- * suitable for ingestion by log aggregation tools.
+ * <p>When no explicit path is provided, the service defaults to
+ * {@code $java.io.tmpdir/joltvm-audit.jsonl}. File rotation is applied automatically:
+ * once the active file exceeds {@value #MAX_FILE_SIZE_BYTES} bytes, it is renamed to
+ * {@code .1} (the previous {@code .1} becomes {@code .2}, etc., up to
+ * {@value #MAX_ROTATED_FILES} retained files).
+ *
+ * <p>The file format is JSON Lines (one JSON object per line), suitable for log
+ * aggregation tools (Fluentd, Logstash, etc.).
  */
 public final class AuditLogService {
 
     private static final Logger LOG = Logger.getLogger(AuditLogService.class.getName());
     private static final int MAX_MEMORY_ENTRIES = 1000;
-    private static final DateTimeFormatter ISO_FORMATTER =
-            DateTimeFormatter.ISO_INSTANT;
+
+    /** Maximum file size before rotation is triggered (10 MB). */
+    static final long MAX_FILE_SIZE_BYTES = 10L * 1024 * 1024;
+
+    /** Number of rotated history files to retain. */
+    static final int MAX_ROTATED_FILES = 3;
+
+    private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_INSTANT;
 
     private final List<AuditEntry> entries = new CopyOnWriteArrayList<>();
     private final Path logFile;
 
     /**
-     * Creates an audit log service without file persistence.
+     * Creates an audit log service with the default file path
+     * ({@code $java.io.tmpdir/joltvm-audit.jsonl}).
      */
     public AuditLogService() {
         this(null);
     }
 
     /**
-     * Creates an audit log service with file persistence.
+     * Creates an audit log service that persists to the default path
+     * ({@code $TMPDIR/joltvm-audit.jsonl}).
      *
-     * @param logFile path to the audit log file (null for memory-only)
+     * <p>Use this factory method instead of the no-arg constructor when running
+     * as an embedded agent and no explicit {@code auditFile} argument was provided.
+     *
+     * @return a new service backed by the default file path
+     */
+    public static AuditLogService createWithDefaultPath() {
+        return new AuditLogService(
+                Paths.get(System.getProperty("java.io.tmpdir"), "joltvm-audit.jsonl"));
+    }
+
+    /**
+     * Creates an audit log service with an explicit file path, or memory-only if {@code null}.
+     *
+     * @param logFile path to the audit log file, or {@code null} for memory-only
      */
     public AuditLogService(Path logFile) {
         this.logFile = logFile;
-        if (logFile != null) {
+        if (logFile != null && logFile.getParent() != null) {
             try {
                 Files.createDirectories(logFile.getParent());
             } catch (IOException e) {
@@ -145,9 +174,20 @@ public final class AuditLogService {
     /**
      * Exports all entries as JSON Lines string.
      *
+     * <p>When file persistence is active, returns the file content (which contains all
+     * historical entries including those evicted from the in-memory buffer). Falls back
+     * to the in-memory buffer when no file is configured or the file cannot be read.
+     *
      * @return JSON Lines formatted string
      */
     public String exportAsJsonLines() {
+        if (logFile != null && Files.exists(logFile)) {
+            try {
+                return Files.readString(logFile, StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                LOG.log(Level.WARNING, "Failed to read audit log file for export", e);
+            }
+        }
         StringBuilder sb = new StringBuilder();
         for (AuditEntry entry : entries) {
             sb.append(entry.toJsonLine()).append('\n');
@@ -181,21 +221,52 @@ public final class AuditLogService {
     private void addEntry(AuditEntry entry) {
         entries.add(entry);
 
-        // Trim old entries
+        // Trim old entries from in-memory buffer
         while (entries.size() > MAX_MEMORY_ENTRIES) {
             entries.remove(0);
         }
 
-        // Persist to file
+        // Persist to file with rotation
         if (logFile != null) {
-            try (BufferedWriter writer = Files.newBufferedWriter(logFile, StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
-                writer.write(entry.toJsonLine());
-                writer.newLine();
+            try {
+                rotateIfNeeded();
+                try (BufferedWriter writer = Files.newBufferedWriter(logFile, StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+                    writer.write(entry.toJsonLine());
+                    writer.newLine();
+                }
             } catch (IOException e) {
                 LOG.log(Level.WARNING, "Failed to write audit log entry", e);
             }
         }
+    }
+
+    /**
+     * Rotates the log file if it has exceeded {@value #MAX_FILE_SIZE_BYTES} bytes.
+     *
+     * <p>Rotation renames the current file: {@code .jsonl} → {@code .jsonl.1}, shifting
+     * existing rotated files down. Files beyond {@value #MAX_ROTATED_FILES} are deleted.
+     */
+    private void rotateIfNeeded() throws IOException {
+        if (logFile == null || !Files.exists(logFile)) return;
+        long size = Files.size(logFile);
+        if (size < MAX_FILE_SIZE_BYTES) return;
+
+        LOG.info("Rotating audit log: " + logFile + " (" + size + " bytes)");
+
+        // Shift existing rotated files: .2 → deleted, .1 → .2, current → .1
+        for (int i = MAX_ROTATED_FILES; i >= 1; i--) {
+            Path rotated = Paths.get(logFile + "." + i);
+            if (Files.exists(rotated)) {
+                if (i == MAX_ROTATED_FILES) {
+                    Files.delete(rotated);
+                } else {
+                    Files.move(rotated, Paths.get(logFile + "." + (i + 1)),
+                            StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        }
+        Files.move(logFile, Paths.get(logFile + ".1"), StandardCopyOption.REPLACE_EXISTING);
     }
 
     private static String csvEscape(String value) {

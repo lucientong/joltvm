@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-14
+
+### Security
+- **P0.1 Unified config pipeline** — Agent arguments (`security`, `adminPassword`, `auditFile`) now flow through a single path: `JoltVMAgent` → `JoltVMServer(int, Map)` → `APIRoutes.registerAll(…, agentArgs)`. Eliminates split SecurityConfig instances.
+- **P0.2 Password hashing** — `SecurityConfig` now stores passwords as salted SHA-256 hashes (`hex(salt)$hex(SHA-256(salt‖password))`). Plaintext is never stored. Default admin account is flagged `passwordChangeRequired=true`; `LoginHandler` surfaces this flag in the login response.
+- **P0.3 Token revocation** — `TokenService` maintains a `revokedTokens` map. `invalidateToken()` adds tokens to the revocation list; `validateToken()` rejects revoked tokens before HMAC verification. Expired revocation entries are cleaned up lazily every 100 validation calls.
+- **P0.4 Login rate limiting** — New `LoginRateLimiter` (IP-based sliding-window, 10 failures / 5 minutes). `LoginHandler` injects rate limiter; `HttpDispatcherHandler` injects client IP as synthetic `"_ip"` path parameter via `X-Forwarded-For` or `channel.remoteAddress()`. Blocked requests receive HTTP 429.
+
+### Robustness
+- **P1.1 HotSwap concurrency** — `HotSwapService` uses per-class `ReentrantLock` to serialize concurrent `hotSwap` and `rollback` calls on the same class name. `BytecodeBackupService` enforces a 100-class backup limit to prevent unbounded memory growth.
+- **P1.2 Graceful shutdown** — `JoltVMServer.stop()` now calls `MethodTraceService.stopAll()` to stop sampling threads and release Byte Buddy transformers. `MethodTraceService.stopTrace()` uses the saved `ResettableClassFileTransformer` reference to properly remove Advice bytecode instead of just calling `retransformClasses`.
+- **P1.3 Error sanitization** — `HttpDispatcherHandler` global exception handler returns a fixed `"Internal server error (id: <uuid>)"` message; details are only written to the server log. JSON parse errors in all request handlers are replaced with `"Invalid JSON in request body."`. Operational errors (`HotSwapHandler`, `RollbackHandler`, `ClassSourceHandler`, `TraceHandler`, `StaticFileHandler`) return generic messages without exposing stack traces or internal paths.
+
+### Product Experience
+- **P2.1 CDN offline fallback** — Bundled vendor files (`d3.min.js`, `d3-flamegraph.min.js`, `d3-flamegraph.css`) in `webui/vendor/`. CDN `<script>` and `<link>` tags use `onerror` to fall back to local vendor paths automatically. Works fully offline in air-gapped environments.
+- **P2.2 README alignment** — Allocation view and side-by-side comparison marked as **planned**. Added comprehensive Agent argument reference table to both `README.md` and `README_zh.md`.
+- **P2.3 Audit log persistence** — `AuditLogService()` (no-arg) now defaults to `$TMPDIR/joltvm-audit.jsonl` instead of memory-only. Automatic file rotation at 10 MB (max 3 rotated files). `exportAsJsonLines()` merges in-memory buffer with persisted file content.
+
 ## [0.7.0] - 2026-04-14
 
 ### Added

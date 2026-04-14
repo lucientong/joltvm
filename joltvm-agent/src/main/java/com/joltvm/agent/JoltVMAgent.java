@@ -148,7 +148,7 @@ public final class JoltVMAgent {
             LOG.warning("Invalid port value: " + parsedArgs.get("port") + ", using default: " + DEFAULT_PORT);
             port = DEFAULT_PORT;
         }
-        startServer(port);
+        startServer(port, parsedArgs);
 
         // Spring Boot awareness is handled by SpringContextService
         // (lazy discovery when /api/spring/* endpoints are first accessed)
@@ -162,25 +162,36 @@ public final class JoltVMAgent {
      * from joltvm-agent → joltvm-server (which would create a circular dependency
      * since joltvm-server depends on joltvm-agent for InstrumentationHolder).
      *
-     * @param port the port to listen on
+     * <p>Passes the full {@code agentArgs} map to {@code JoltVMServer} and
+     * {@code APIRoutes.registerAll} so all configuration (security, adminPassword,
+     * auditFile, etc.) flows through a single path.
+     *
+     * @param port      the port to listen on
+     * @param agentArgs parsed agent argument map
      */
-    private static void startServer(int port) {
+    private static void startServer(int port, Map<String, String> agentArgs) {
         try {
             // Reflective equivalent of:
-            //   JoltVMServer server = new JoltVMServer(port);
-            //   APIRoutes.registerAll(server.getRouter());
+            //   JoltVMServer server = new JoltVMServer(port, agentArgs);
+            //   APIRoutes.registerAll(server.getRouter(), server.getSecurityConfig(),
+            //                         server.getTokenService(), agentArgs);
             //   server.start();
             Class<?> serverClass = Class.forName(SERVER_CLASS);
-            server = serverClass.getConstructor(int.class).newInstance(port);
+            server = serverClass.getConstructor(int.class, Map.class).newInstance(port, agentArgs);
 
-            // Get the router and register all API routes
+            // Get router and security objects from server
             Method getRouter = serverClass.getMethod("getRouter");
             Object router = getRouter.invoke(server);
 
+            Object securityConfig = serverClass.getMethod("getSecurityConfig").invoke(server);
+            Object tokenService = serverClass.getMethod("getTokenService").invoke(server);
+
+            // Call APIRoutes.registerAll(router, securityConfig, tokenService, agentArgs)
             Class<?> apiRoutesClass = Class.forName(API_ROUTES_CLASS);
             Class<?> routerClass = router.getClass();
-            Method registerAll = apiRoutesClass.getMethod("registerAll", routerClass);
-            registerAll.invoke(null, router);
+            Method registerAll = apiRoutesClass.getMethod("registerAll",
+                    routerClass, securityConfig.getClass(), tokenService.getClass(), Map.class);
+            registerAll.invoke(null, router, securityConfig, tokenService, agentArgs);
 
             // Start server on a daemon thread
             Method startMethod = serverClass.getMethod("start");

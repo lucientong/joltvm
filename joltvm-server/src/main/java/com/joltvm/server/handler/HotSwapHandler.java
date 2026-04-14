@@ -96,7 +96,7 @@ public class HotSwapHandler implements RouteHandler {
             bodyMap = HttpResponseHelper.gson().fromJson(body, Map.class);
         } catch (Exception e) {
             return HttpResponseHelper.error(HttpResponseStatus.BAD_REQUEST,
-                    "Invalid JSON body: " + e.getMessage());
+                    "Invalid JSON in request body.");
         }
 
         String className = (String) bodyMap.get("className");
@@ -172,8 +172,7 @@ public class HotSwapHandler implements RouteHandler {
 
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Hot-swap error for " + className, e);
-            return HttpResponseHelper.error(HttpResponseStatus.INTERNAL_SERVER_ERROR,
-                    "Hot-swap error: " + e.getMessage());
+            return HttpResponseHelper.serverError("Hot-swap failed due to an internal error.");
         }
     }
 

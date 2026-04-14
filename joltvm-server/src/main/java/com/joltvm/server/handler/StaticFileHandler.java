@@ -98,7 +98,7 @@ public final class StaticFileHandler implements RouteHandler {
 
         } catch (IOException e) {
             LOG.log(Level.WARNING, "Error reading static file: " + fullPath, e);
-            return HttpResponseHelper.serverError("Error reading static file: " + e.getMessage());
+            return HttpResponseHelper.serverError("Error reading requested file.");
         }
     }
 

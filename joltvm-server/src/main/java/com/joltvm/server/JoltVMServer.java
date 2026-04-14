@@ -26,12 +26,17 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.stream.ChunkedWriteHandler;
 
 import com.joltvm.server.handler.StaticFileHandler;
 import com.joltvm.server.security.SecurityConfig;
 import com.joltvm.server.security.TokenService;
+import com.joltvm.server.tracing.MethodTraceService;
 
+import java.io.File;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
@@ -75,6 +80,13 @@ public final class JoltVMServer {
     private final StaticFileHandler staticFileHandler;
     private final SecurityConfig securityConfig;
     private final TokenService tokenService;
+
+    /**
+     * Optional TLS context. Non-null when {@code tlsCert} + {@code tlsKey} agent args are provided.
+     * When set, the Netty pipeline is prefixed with an {@code SslHandler} enabling HTTPS.
+     */
+    private final SslContext sslContext;
+
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     private EventLoopGroup bossGroup;
@@ -99,6 +111,36 @@ public final class JoltVMServer {
     }
 
     /**
+     * Creates a server configured from agent argument key-value pairs.
+     *
+     * <p>Supported keys:
+     * <table>
+     *   <tr><th>Key</th><th>Default</th><th>Description</th></tr>
+     *   <tr><td>{@code security}</td><td>{@code false}</td><td>Enable authentication ({@code true}/{@code false})</td></tr>
+     *   <tr><td>{@code adminPassword}</td><td>{@code joltvm}</td><td>Initial admin password (stored as salted SHA-256 hash)</td></tr>
+     * </table>
+     *
+     * @param port      the TCP port to listen on (must be 1–65535)
+     * @param agentArgs parsed agent argument map (may be empty, never null)
+     * @throws IllegalArgumentException if port is out of range
+     */
+    public JoltVMServer(int port, Map<String, String> agentArgs) {
+        if (port < 1 || port > 65535) {
+            throw new IllegalArgumentException("Port must be between 1 and 65535, got: " + port);
+        }
+        this.port = port;
+        this.router = new HttpRouter();
+        this.staticFileHandler = new StaticFileHandler();
+        boolean secEnabled = "true".equalsIgnoreCase(
+                agentArgs.getOrDefault("security", "false"));
+        String adminPwd = agentArgs.getOrDefault("adminPassword",
+                SecurityConfig.DEFAULT_ADMIN_PASSWORD);
+        this.securityConfig = new SecurityConfig(secEnabled, adminPwd);
+        this.tokenService = new TokenService();
+        this.sslContext = buildSslContext(agentArgs.get("tlsCert"), agentArgs.get("tlsKey"));
+    }
+
+    /**
      * Creates a server with explicit security configuration.
      *
      * @param port           the TCP port to listen on
@@ -114,6 +156,7 @@ public final class JoltVMServer {
         this.staticFileHandler = new StaticFileHandler();
         this.securityConfig = Objects.requireNonNull(securityConfig, "securityConfig");
         this.tokenService = Objects.requireNonNull(tokenService, "tokenService");
+        this.sslContext = null;
     }
 
     /**
@@ -142,6 +185,9 @@ public final class JoltVMServer {
                     .childHandler(new ChannelInitializer<SocketChannel>() {
                         @Override
                         protected void initChannel(SocketChannel ch) {
+                            if (sslContext != null) {
+                                ch.pipeline().addFirst(sslContext.newHandler(ch.alloc()));
+                            }
                             ch.pipeline().addLast(
                                     new HttpServerCodec(),
                                     new HttpObjectAggregator(MAX_CONTENT_LENGTH),
@@ -173,6 +219,17 @@ public final class JoltVMServer {
         }
 
         LOG.info("Stopping JoltVM server...");
+
+        // Stop any active tracing/sampling before shutting down Netty threads
+        MethodTraceService traceService = APIRoutes.getTraceService();
+        if (traceService != null) {
+            try {
+                traceService.stopAll();
+                LOG.info("MethodTraceService stopped");
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Error stopping MethodTraceService", e);
+            }
+        }
 
         if (serverChannel != null) {
             try {
@@ -230,6 +287,34 @@ public final class JoltVMServer {
      */
     public TokenService getTokenService() {
         return tokenService;
+    }
+
+    /**
+     * Returns whether TLS is enabled (i.e., both {@code tlsCert} and {@code tlsKey} were provided).
+     *
+     * @return {@code true} if TLS is active
+     */
+    public boolean isTlsEnabled() {
+        return sslContext != null;
+    }
+
+    /**
+     * Builds an {@link SslContext} from the given certificate and key files.
+     *
+     * @param certPath path to the PEM certificate file, or {@code null}
+     * @param keyPath  path to the PEM private key file, or {@code null}
+     * @return an {@link SslContext}, or {@code null} if either path is absent
+     */
+    private static SslContext buildSslContext(String certPath, String keyPath) {
+        if (certPath == null || keyPath == null) return null;
+        try {
+            return SslContextBuilder
+                    .forServer(new File(certPath), new File(keyPath))
+                    .build();
+        } catch (Exception e) {
+            throw new IllegalArgumentException(
+                    "Failed to build TLS context from cert=" + certPath + " key=" + keyPath, e);
+        }
     }
 
     private static void shutdown(EventLoopGroup... groups) {

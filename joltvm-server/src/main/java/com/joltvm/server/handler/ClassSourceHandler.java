@@ -91,8 +91,7 @@ public final class ClassSourceHandler implements RouteHandler {
             return HttpResponseHelper.json(result);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Failed to decompile class: " + className, e);
-            return HttpResponseHelper.error(HttpResponseStatus.INTERNAL_SERVER_ERROR,
-                    "Failed to decompile class: " + e.getMessage());
+            return HttpResponseHelper.serverError("Failed to decompile the requested class.");
         }
     }
 

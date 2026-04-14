@@ -27,7 +27,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -54,7 +56,8 @@ import java.util.logging.Logger;
  *   <li>Record: log the rollback to history</li>
  * </ol>
  *
- * <p>Thread-safe: uses {@link CopyOnWriteArrayList} for history.
+ * <p>Thread-safe: uses {@link CopyOnWriteArrayList} for history and per-class
+ * {@link ReentrantLock} to serialize concurrent hot-swap / rollback on the same class.
  */
 public class HotSwapService {
 
@@ -63,6 +66,12 @@ public class HotSwapService {
 
     private final BytecodeBackupService backupService;
     private final List<HotSwapRecord> history = new CopyOnWriteArrayList<>();
+
+    /**
+     * Per-class locks that serialize concurrent hotSwap / rollback on the same class name.
+     * This prevents {@code Instrumentation.redefineClasses} calls from racing with each other.
+     */
+    private final ConcurrentHashMap<String, ReentrantLock> classLocks = new ConcurrentHashMap<>();
 
     public HotSwapService() {
         this.backupService = new BytecodeBackupService();
@@ -111,6 +120,17 @@ public class HotSwapService {
      */
     public HotSwapRecord hotSwap(String className, byte[] newBytecode,
                                   String operator, String reason, String precomputedDiff) {
+        ReentrantLock lock = classLocks.computeIfAbsent(className, k -> new ReentrantLock());
+        lock.lock();
+        try {
+            return doHotSwap(className, newBytecode, operator, reason, precomputedDiff);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private HotSwapRecord doHotSwap(String className, byte[] newBytecode,
+                                     String operator, String reason, String precomputedDiff) {
         Instrumentation inst = InstrumentationHolder.get();
 
         // 1. Validate redefine support
@@ -211,12 +231,24 @@ public class HotSwapService {
     /**
      * Rolls back with operator tracking.
      *
+     * <p>Serialized per class name to prevent races with concurrent hotSwap calls.
+     *
      * @param className the fully qualified class name
      * @param operator  the user performing the rollback (may be null)
      * @param reason    the reason for rollback (may be null)
      * @return the rollback record
      */
     public HotSwapRecord rollback(String className, String operator, String reason) {
+        ReentrantLock lock = classLocks.computeIfAbsent(className, k -> new ReentrantLock());
+        lock.lock();
+        try {
+            return doRollback(className, operator, reason);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private HotSwapRecord doRollback(String className, String operator, String reason) {
         Instrumentation inst = InstrumentationHolder.get();
 
         // 1. Check backup exists

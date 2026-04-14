@@ -89,7 +89,7 @@ public class TraceHandler implements RouteHandler {
             bodyMap = HttpResponseHelper.gson().fromJson(body, Map.class);
         } catch (Exception e) {
             return HttpResponseHelper.error(HttpResponseStatus.BAD_REQUEST,
-                    "Invalid JSON body: " + e.getMessage());
+                    "Invalid JSON in request body.");
         }
 
         String type = (String) bodyMap.get("type");
@@ -111,8 +111,7 @@ public class TraceHandler implements RouteHandler {
             return HttpResponseHelper.error(HttpResponseStatus.BAD_REQUEST, e.getMessage());
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Failed to start tracing", e);
-            return HttpResponseHelper.error(HttpResponseStatus.INTERNAL_SERVER_ERROR,
-                    "Failed to start tracing: " + e.getMessage());
+            return HttpResponseHelper.serverError("Failed to start tracing due to an internal error.");
         }
     }
 
