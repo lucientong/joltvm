@@ -468,13 +468,13 @@ public class MethodTraceService {
         /**
          * Called after the traced method body executes (on both normal return and exception).
          *
-         * @param startTime      the start time from onEnter
-         * @param returnValue    the return value (null if void or exception)
-         * @param thrown         the exception thrown (null if no exception)
-         * @param methodName     the traced method name
-         * @param declaringType  the declaring class name
-         * @param parameterTypes the parameter type names
-         * @param arguments      the method arguments
+         * @param startTime     the start time from onEnter
+         * @param returnValue   the return value (null if void or exception)
+         * @param thrown        the exception thrown (null if no exception)
+         * @param methodName    the traced method name
+         * @param declaringType the declaring class name
+         * @param signature     the full method signature (used to extract parameter types)
+         * @param arguments     the method arguments
          */
         @Advice.OnMethodExit(onThrowable = Throwable.class)
         public static void onExit(
