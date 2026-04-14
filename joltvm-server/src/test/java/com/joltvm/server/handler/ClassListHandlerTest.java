@@ -17,7 +17,6 @@
 package com.joltvm.server.handler;
 
 import com.joltvm.agent.InstrumentationHolder;
-import com.joltvm.server.HttpResponseHelper;
 import io.netty.handler.codec.http.DefaultFullHttpRequest;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
@@ -32,7 +31,6 @@ import org.junit.jupiter.api.Test;
 import java.lang.instrument.ClassDefinition;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
-import java.lang.instrument.UnmodifiableClassException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.jar.JarFile;
@@ -192,6 +190,7 @@ class ClassListHandlerTest {
     /**
      * Stub Instrumentation that returns a small, deterministic set of classes.
      */
+    @SuppressWarnings("rawtypes")
     private static class StubInstrumentation implements Instrumentation {
 
         @Override

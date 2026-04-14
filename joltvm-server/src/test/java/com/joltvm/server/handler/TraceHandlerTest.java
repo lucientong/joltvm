@@ -17,9 +17,7 @@
 package com.joltvm.server.handler;
 
 import com.joltvm.server.HttpResponseHelper;
-import com.joltvm.server.tracing.FlameGraphCollector;
 import com.joltvm.server.tracing.MethodTraceService;
-import com.joltvm.server.tracing.TraceRecord;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.DefaultFullHttpRequest;
 import io.netty.handler.codec.http.FullHttpRequest;
@@ -33,8 +31,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-14
+
+### Added
+- **Security: RBAC** (`Role`) — Three-tier hierarchical role-based access control: Viewer (read-only) < Operator (hot-fix + trace) < Admin (full access). Higher roles inherit all lower-role permissions via `hasPermission()`.
+- **Security: Token Authentication** (`TokenService`) — HMAC-SHA256 token-based authentication with `SecureRandom` 32-byte key generation, Base64 payload encoding, configurable expiration (default 24h), in-memory active token tracking, immediate invalidation support, and constant-time signature comparison to prevent timing attacks.
+- **Security: Configuration** (`SecurityConfig`) — User management with `ConcurrentHashMap` storage, credential validation, default admin account (`admin/joltvm`), and runtime enable/disable toggle for authentication.
+- **Security: Route Permissions** (`RoutePermissions`) — API endpoint to minimum role mapping with 19 permission rules. Supports exact match, prefix match (for parameterized routes), and auth-exempt endpoints (`/api/auth/login`, `/api/auth/status`, static files).
+- **Security: Audit Log** (`AuditLogService`) — Persistent audit logging with in-memory `CopyOnWriteArrayList` (max 1000 entries) and optional JSON Lines file persistence. Records both hot-swap operations and security events (login, access denied, etc.). Supports JSON Lines and CSV export formats.
+- **Security: Authentication Middleware** — Token-based authentication and RBAC enforcement integrated into `HttpDispatcherHandler.channelRead0()` as request middleware. Extracts Bearer token, validates via `TokenService`, checks role permissions, returns 401/403 on failure.
+- **REST API: `POST /api/auth/login`** — Authenticate with username/password, returns HMAC token with role and expiration. Returns dummy admin token when security is disabled.
+- **REST API: `GET /api/auth/status`** — Query current authentication state. Returns `authEnabled` flag and, if a valid Bearer token is provided, the authenticated user's info.
+- **REST API: `GET /api/audit/export`** — Export audit logs in JSON Lines (default) or CSV format. Requires ADMIN role. Sets `Content-Disposition` for file download.
+- **Audit Integration** — `HotSwapHandler` and `RollbackHandler` now extract `operator` (from Bearer token payload) and `reason` (from request body), pass them to `HotSwapService`, and record operations to `AuditLogService`.
+- **`HotSwapRecord` Extended** — Added `operator`, `reason`, and `diff` fields with backward-compatible constructor overload.
+- **53+ new tests** — Role (3), SecurityConfig (10), TokenService (15), AuditLogService (12), RoutePermissions (13), APIRoutes security endpoints (2), HttpDispatcherHandler authentication/authorization (11)
+
+### Changed
+- `APIRoutes` now registers 21 routes (was 18): added 3 security/audit endpoints
+- `APIRoutes` now supports overloaded `registerAll()` with `SecurityConfig` and `TokenService` parameters
+- `APIRoutes` maintains `AuditLogService` singleton accessible via `getAuditLogService()`
+- `HttpDispatcherHandler` now accepts optional `SecurityConfig` and `TokenService` for authentication middleware (backward compatible, 4 constructor overloads)
+- `HttpDispatcherHandler` CORS preflight now includes `Authorization` in `Access-Control-Allow-Headers`
+- `JoltVMServer` creates and injects security services into the Netty pipeline
+- Updated project version to 0.7.0
+
 ## [0.6.0] - 2026-04-11
 
 ### Added

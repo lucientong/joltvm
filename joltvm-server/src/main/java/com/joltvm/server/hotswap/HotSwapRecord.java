@@ -17,7 +17,6 @@
 package com.joltvm.server.hotswap;
 
 import java.time.Instant;
-import java.util.List;
 
 /**
  * Immutable record of a hot-swap operation for audit/history tracking.
@@ -28,6 +27,9 @@ import java.util.List;
  * @param status    the result (SUCCESS or FAILED)
  * @param message   additional message (e.g., error info)
  * @param timestamp when the operation was performed
+ * @param operator  the user who performed the operation (null if auth disabled)
+ * @param reason    the reason for the operation (optional, user-provided)
+ * @param diff      summary of bytecode changes (optional, auto-generated)
  */
 public record HotSwapRecord(
         String id,
@@ -35,8 +37,19 @@ public record HotSwapRecord(
         Action action,
         Status status,
         String message,
-        Instant timestamp
+        Instant timestamp,
+        String operator,
+        String reason,
+        String diff
 ) {
+
+    /**
+     * Backward-compatible constructor without operator/reason/diff fields.
+     */
+    public HotSwapRecord(String id, String className, Action action,
+                         Status status, String message, Instant timestamp) {
+        this(id, className, action, status, message, timestamp, null, null, null);
+    }
 
     public enum Action {
         HOTSWAP, ROLLBACK

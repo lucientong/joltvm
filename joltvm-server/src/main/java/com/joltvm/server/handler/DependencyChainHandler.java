@@ -23,10 +23,7 @@ import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
 
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
 
 /**
  * Handler for {@code GET /api/spring/dependencies/{beanName}} — returns the
@@ -64,7 +61,6 @@ import java.util.logging.Logger;
  */
 public final class DependencyChainHandler implements RouteHandler {
 
-    private static final Logger LOG = Logger.getLogger(DependencyChainHandler.class.getName());
 
     private final SpringContextService springService;
 

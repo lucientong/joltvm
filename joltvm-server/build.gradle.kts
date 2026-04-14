@@ -33,4 +33,7 @@ dependencies {
 
     // Byte Buddy for method tracing (Phase 4)
     implementation("net.bytebuddy:byte-buddy:${property("byteBuddyVersion")}")
+
+    // Unified diff generation for hot-swap audit (Phase 8)
+    implementation("io.github.java-diff-utils:java-diff-utils:${property("javaDiffUtilsVersion")}")
 }

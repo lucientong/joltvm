@@ -17,7 +17,6 @@
 package com.joltvm.server;
 
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.DefaultFullHttpRequest;
 import io.netty.handler.codec.http.FullHttpRequest;
@@ -26,13 +25,15 @@ import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
+import com.joltvm.server.security.Role;
+import com.joltvm.server.security.SecurityConfig;
+import com.joltvm.server.security.TokenService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -422,6 +423,188 @@ class HttpDispatcherHandlerTest {
             FullHttpResponse response = dispatch(handler, get("/api/classes/com.example.My%24Inner"));
 
             assertEquals(HttpResponseStatus.OK, response.status());
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Authentication & Authorization
+    // ----------------------------------------------------------------
+    @Nested
+    @DisplayName("Authentication & Authorization")
+    class AuthenticationAuthorization {
+
+        private SecurityConfig securityConfig;
+        private TokenService tokenService;
+
+        @BeforeEach
+        void setUpSecurity() {
+            securityConfig = new SecurityConfig(true);
+            securityConfig.addUser("viewer", "pass", Role.VIEWER);
+            securityConfig.addUser("operator", "pass", Role.OPERATOR);
+            tokenService = new TokenService();
+        }
+
+        private HttpDispatcherHandler secureHandler() {
+            return new HttpDispatcherHandler(router, null, securityConfig, tokenService);
+        }
+
+        private FullHttpRequest getWithToken(String uri, String token) {
+            FullHttpRequest req = get(uri);
+            req.headers().set("Authorization", "Bearer " + token);
+            return req;
+        }
+
+        @Test
+        @DisplayName("returns 401 for protected endpoint without token")
+        void protectedEndpointNoToken() {
+            router.addRoute(HttpMethod.GET, "/api/health", (req, params) ->
+                    HttpResponseHelper.json(Map.of("status", "UP")));
+
+            FullHttpResponse response = dispatch(secureHandler(), get("/api/health"));
+
+            assertEquals(HttpResponseStatus.UNAUTHORIZED, response.status());
+            String body = response.content().toString(StandardCharsets.UTF_8);
+            assertTrue(body.contains("Authentication required"));
+        }
+
+        @Test
+        @DisplayName("returns 401 for invalid token")
+        void invalidToken() {
+            router.addRoute(HttpMethod.GET, "/api/health", (req, params) ->
+                    HttpResponseHelper.json(Map.of("status", "UP")));
+
+            FullHttpResponse response = dispatch(secureHandler(),
+                    getWithToken("/api/health", "invalid-token-value"));
+
+            assertEquals(HttpResponseStatus.UNAUTHORIZED, response.status());
+            String body = response.content().toString(StandardCharsets.UTF_8);
+            assertTrue(body.contains("Invalid or expired token"));
+        }
+
+        @Test
+        @DisplayName("returns 200 for valid VIEWER token on VIEWER endpoint")
+        void viewerAccessViewerEndpoint() {
+            router.addRoute(HttpMethod.GET, "/api/health", (req, params) ->
+                    HttpResponseHelper.json(Map.of("status", "UP")));
+
+            String token = tokenService.generateToken("viewer", Role.VIEWER);
+            FullHttpResponse response = dispatch(secureHandler(),
+                    getWithToken("/api/health", token));
+
+            assertEquals(HttpResponseStatus.OK, response.status());
+        }
+
+        @Test
+        @DisplayName("returns 403 for VIEWER token on OPERATOR endpoint")
+        void viewerDeniedOperatorEndpoint() {
+            router.addRoute(HttpMethod.POST, "/api/hotswap", (req, params) ->
+                    HttpResponseHelper.json(Map.of("success", true)));
+
+            String token = tokenService.generateToken("viewer", Role.VIEWER);
+            DefaultFullHttpRequest req = new DefaultFullHttpRequest(
+                    HttpVersion.HTTP_1_1, HttpMethod.POST, "/api/hotswap");
+            req.headers().set("Authorization", "Bearer " + token);
+
+            FullHttpResponse response = dispatch(secureHandler(), req);
+
+            assertEquals(HttpResponseStatus.FORBIDDEN, response.status());
+            String body = response.content().toString(StandardCharsets.UTF_8);
+            assertTrue(body.contains("Insufficient permissions"));
+        }
+
+        @Test
+        @DisplayName("ADMIN can access OPERATOR endpoints")
+        void adminAccessOperatorEndpoint() {
+            router.addRoute(HttpMethod.POST, "/api/hotswap", (req, params) ->
+                    HttpResponseHelper.json(Map.of("success", true)));
+
+            String token = tokenService.generateToken("admin", Role.ADMIN);
+            DefaultFullHttpRequest req = new DefaultFullHttpRequest(
+                    HttpVersion.HTTP_1_1, HttpMethod.POST, "/api/hotswap");
+            req.headers().set("Authorization", "Bearer " + token);
+
+            FullHttpResponse response = dispatch(secureHandler(), req);
+
+            assertEquals(HttpResponseStatus.OK, response.status());
+        }
+
+        @Test
+        @DisplayName("OPERATOR can access VIEWER endpoints")
+        void operatorAccessViewerEndpoint() {
+            router.addRoute(HttpMethod.GET, "/api/health", (req, params) ->
+                    HttpResponseHelper.json(Map.of("status", "UP")));
+
+            String token = tokenService.generateToken("operator", Role.OPERATOR);
+            FullHttpResponse response = dispatch(secureHandler(),
+                    getWithToken("/api/health", token));
+
+            assertEquals(HttpResponseStatus.OK, response.status());
+        }
+
+        @Test
+        @DisplayName("auth/login endpoint is accessible without token")
+        void loginEndpointNoAuth() {
+            router.addRoute(HttpMethod.POST, "/api/auth/login", (req, params) ->
+                    HttpResponseHelper.json(Map.of("token", "test")));
+
+            DefaultFullHttpRequest req = new DefaultFullHttpRequest(
+                    HttpVersion.HTTP_1_1, HttpMethod.POST, "/api/auth/login");
+
+            FullHttpResponse response = dispatch(secureHandler(), req);
+
+            assertEquals(HttpResponseStatus.OK, response.status());
+        }
+
+        @Test
+        @DisplayName("auth/status endpoint is accessible without token")
+        void authStatusEndpointNoAuth() {
+            router.addRoute(HttpMethod.GET, "/api/auth/status", (req, params) ->
+                    HttpResponseHelper.json(Map.of("authEnabled", true)));
+
+            FullHttpResponse response = dispatch(secureHandler(), get("/api/auth/status"));
+
+            assertEquals(HttpResponseStatus.OK, response.status());
+        }
+
+        @Test
+        @DisplayName("static files are accessible without auth")
+        void staticFilesNoAuth() {
+            RouteHandler staticHandler = (req, params) ->
+                    HttpResponseHelper.text("css content");
+
+            HttpDispatcherHandler handler = new HttpDispatcherHandler(
+                    router, staticHandler, securityConfig, tokenService);
+            FullHttpResponse response = dispatch(handler, get("/css/app.css"));
+
+            assertEquals(HttpResponseStatus.OK, response.status());
+        }
+
+        @Test
+        @DisplayName("security is bypassed when disabled")
+        void securityDisabled() {
+            SecurityConfig disabledConfig = new SecurityConfig(false);
+            router.addRoute(HttpMethod.GET, "/api/health", (req, params) ->
+                    HttpResponseHelper.json(Map.of("status", "UP")));
+
+            HttpDispatcherHandler handler = new HttpDispatcherHandler(
+                    router, null, disabledConfig, tokenService);
+            FullHttpResponse response = dispatch(handler, get("/api/health"));
+
+            assertEquals(HttpResponseStatus.OK, response.status());
+        }
+
+        @Test
+        @DisplayName("returns 401 for malformed Authorization header (not Bearer)")
+        void malformedAuthHeader() {
+            router.addRoute(HttpMethod.GET, "/api/health", (req, params) ->
+                    HttpResponseHelper.json(Map.of("status", "UP")));
+
+            FullHttpRequest req = get("/api/health");
+            req.headers().set("Authorization", "Basic dXNlcjpwYXNz");
+
+            FullHttpResponse response = dispatch(secureHandler(), req);
+
+            assertEquals(HttpResponseStatus.UNAUTHORIZED, response.status());
         }
     }
 }

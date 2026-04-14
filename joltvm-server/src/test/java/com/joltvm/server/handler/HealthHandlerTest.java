@@ -16,7 +16,6 @@
 
 package com.joltvm.server.handler;
 
-import com.joltvm.server.HttpResponseHelper;
 import io.netty.handler.codec.http.DefaultFullHttpRequest;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;

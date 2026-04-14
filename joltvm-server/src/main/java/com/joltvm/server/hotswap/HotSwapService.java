@@ -82,6 +82,35 @@ public class HotSwapService {
      * @throws HotSwapException if the operation fails
      */
     public HotSwapRecord hotSwap(String className, byte[] newBytecode) {
+        return hotSwap(className, newBytecode, null, null);
+    }
+
+    /**
+     * Performs a hot-swap with operator tracking.
+     *
+     * @param className   the fully qualified class name
+     * @param newBytecode the new bytecode to apply
+     * @param operator    the user performing the operation (may be null)
+     * @param reason      the reason for the hot-swap (may be null)
+     * @return the hot-swap record
+     */
+    public HotSwapRecord hotSwap(String className, byte[] newBytecode,
+                                  String operator, String reason) {
+        return hotSwap(className, newBytecode, operator, reason, null);
+    }
+
+    /**
+     * Performs a hot-swap with operator tracking and a pre-computed diff.
+     *
+     * @param className        the fully qualified class name
+     * @param newBytecode      the new bytecode to apply
+     * @param operator         the user performing the operation (may be null)
+     * @param reason           the reason for the hot-swap (may be null)
+     * @param precomputedDiff  a unified diff string computed by the caller (may be null)
+     * @return the hot-swap record
+     */
+    public HotSwapRecord hotSwap(String className, byte[] newBytecode,
+                                  String operator, String reason, String precomputedDiff) {
         Instrumentation inst = InstrumentationHolder.get();
 
         // 1. Validate redefine support
@@ -122,9 +151,21 @@ public class HotSwapService {
             ClassDefinition definition = new ClassDefinition(targetClass, newBytecode);
             inst.redefineClasses(definition);
 
+            // Use pre-computed diff if available, otherwise fall back to byte summary
+            String diff = precomputedDiff;
+            if (diff == null) {
+                diff = "Bytecode replaced: " + newBytecode.length + " bytes";
+                Optional<byte[]> originalBackup = backupService.getBackup(className);
+                if (originalBackup.isPresent()) {
+                    diff = "Original: " + originalBackup.get().length + " bytes → New: "
+                            + newBytecode.length + " bytes";
+                }
+            }
+
             HotSwapRecord record = createRecord(className, HotSwapRecord.Action.HOTSWAP,
                     HotSwapRecord.Status.SUCCESS,
-                    "Successfully redefined " + className + " (" + newBytecode.length + " bytes)");
+                    "Successfully redefined " + className + " (" + newBytecode.length + " bytes)",
+                    operator, reason, diff);
             addHistory(record);
             LOG.info("Hot-swap successful: " + className);
             return record;
@@ -164,6 +205,18 @@ public class HotSwapService {
      * @throws HotSwapException if the operation fails
      */
     public HotSwapRecord rollback(String className) {
+        return rollback(className, null, null);
+    }
+
+    /**
+     * Rolls back with operator tracking.
+     *
+     * @param className the fully qualified class name
+     * @param operator  the user performing the rollback (may be null)
+     * @param reason    the reason for rollback (may be null)
+     * @return the rollback record
+     */
+    public HotSwapRecord rollback(String className, String operator, String reason) {
         Instrumentation inst = InstrumentationHolder.get();
 
         // 1. Check backup exists
@@ -195,9 +248,11 @@ public class HotSwapService {
             // Remove backup after successful rollback
             backupService.removeBackup(className);
 
+            String diff = "Restored original bytecode: " + originalBytecode.length + " bytes";
             HotSwapRecord record = createRecord(className, HotSwapRecord.Action.ROLLBACK,
                     HotSwapRecord.Status.SUCCESS,
-                    "Successfully rolled back " + className + " to original bytecode");
+                    "Successfully rolled back " + className + " to original bytecode",
+                    operator, reason, diff);
             addHistory(record);
             LOG.info("Rollback successful: " + className);
             return record;
@@ -265,13 +320,22 @@ public class HotSwapService {
 
     private HotSwapRecord createRecord(String className, HotSwapRecord.Action action,
                                         HotSwapRecord.Status status, String message) {
+        return createRecord(className, action, status, message, null, null, null);
+    }
+
+    private HotSwapRecord createRecord(String className, HotSwapRecord.Action action,
+                                        HotSwapRecord.Status status, String message,
+                                        String operator, String reason, String diff) {
         return new HotSwapRecord(
                 UUID.randomUUID().toString().substring(0, 8),
                 className,
                 action,
                 status,
                 message,
-                Instant.now()
+                Instant.now(),
+                operator,
+                reason,
+                diff
         );
     }
 

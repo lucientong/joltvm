@@ -16,10 +16,7 @@
 
 package com.joltvm.server.handler;
 
-import com.joltvm.server.HttpResponseHelper;
-import com.joltvm.server.hotswap.HotSwapRecord;
 import com.joltvm.server.hotswap.HotSwapService;
-import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.DefaultFullHttpRequest;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;

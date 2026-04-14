@@ -29,8 +29,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Service for decompiling Java class bytecode to source code using the CFR decompiler.
@@ -42,7 +40,6 @@ import java.util.logging.Logger;
  */
 public class DecompileService {
 
-    private static final Logger LOG = Logger.getLogger(DecompileService.class.getName());
 
     /**
      * Decompiles a loaded class and returns Java source code.

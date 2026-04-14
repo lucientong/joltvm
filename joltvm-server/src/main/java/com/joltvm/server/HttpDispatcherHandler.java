@@ -16,6 +16,10 @@
 
 package com.joltvm.server;
 
+import com.joltvm.server.security.Role;
+import com.joltvm.server.security.RoutePermissions;
+import com.joltvm.server.security.SecurityConfig;
+import com.joltvm.server.security.TokenService;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -37,7 +41,8 @@ import java.util.logging.Logger;
  * Netty channel handler that dispatches incoming HTTP requests to the
  * registered {@link RouteHandler} via the {@link HttpRouter}.
  *
- * <p>Handles CORS preflight (OPTIONS) requests automatically and provides
+ * <p>Handles CORS preflight (OPTIONS) requests automatically, enforces
+ * token-based authentication and RBAC when security is enabled, and provides
  * error handling for unmatched routes and handler exceptions.
  *
  * <p>When no API route matches a GET request, the handler falls back to
@@ -49,14 +54,23 @@ final class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpRe
 
     private final HttpRouter router;
     private final RouteHandler staticFileHandler;
+    private final SecurityConfig securityConfig;
+    private final TokenService tokenService;
 
     HttpDispatcherHandler(HttpRouter router) {
-        this(router, null);
+        this(router, null, null, null);
     }
 
     HttpDispatcherHandler(HttpRouter router, RouteHandler staticFileHandler) {
+        this(router, staticFileHandler, null, null);
+    }
+
+    HttpDispatcherHandler(HttpRouter router, RouteHandler staticFileHandler,
+                          SecurityConfig securityConfig, TokenService tokenService) {
         this.router = router;
         this.staticFileHandler = staticFileHandler;
+        this.securityConfig = securityConfig;
+        this.tokenService = tokenService;
     }
 
     @Override
@@ -76,6 +90,40 @@ final class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpRe
         // Extract path without query string
         QueryStringDecoder decoder = new QueryStringDecoder(request.uri());
         String path = decoder.path();
+
+        // ── Authentication & Authorization ──
+        if (securityConfig != null && securityConfig.isEnabled()) {
+            Role requiredRole = RoutePermissions.getRequiredRole(
+                    request.method().name(), path);
+            if (requiredRole != null) {
+                // Extract Bearer token
+                String authHeader = request.headers().get("Authorization");
+                if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                    FullHttpResponse response = HttpResponseHelper.error(
+                            HttpResponseStatus.UNAUTHORIZED,
+                            "Authentication required. Provide Authorization: Bearer <token>");
+                    sendResponse(ctx, request, response);
+                    return;
+                }
+                String token = authHeader.substring(7);
+                TokenService.TokenInfo tokenInfo = tokenService.validateToken(token);
+                if (tokenInfo == null) {
+                    FullHttpResponse response = HttpResponseHelper.error(
+                            HttpResponseStatus.UNAUTHORIZED,
+                            "Invalid or expired token");
+                    sendResponse(ctx, request, response);
+                    return;
+                }
+                if (!tokenInfo.role().hasPermission(requiredRole)) {
+                    FullHttpResponse response = HttpResponseHelper.error(
+                            HttpResponseStatus.FORBIDDEN,
+                            "Insufficient permissions. Required: " + requiredRole.name()
+                                    + ", current: " + tokenInfo.role().name());
+                    sendResponse(ctx, request, response);
+                    return;
+                }
+            }
+        }
 
         // Route matching
         HttpRouter.RouteMatch match = router.match(request.method(), path);

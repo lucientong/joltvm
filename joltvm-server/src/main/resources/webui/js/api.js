@@ -3,15 +3,31 @@
  * Copyright 2026 lucientong. Apache License 2.0
  *
  * Provides methods to interact with the JoltVM REST API.
+ * Supports token-based authentication when enabled.
  */
 const JoltAPI = (() => {
     const BASE = '';  // Same origin — served by Netty
+    let _token = localStorage.getItem('joltvm_token') || null;
+
+    function setToken(token) {
+        _token = token;
+        if (token) {
+            localStorage.setItem('joltvm_token', token);
+        } else {
+            localStorage.removeItem('joltvm_token');
+        }
+    }
+
+    function getToken() { return _token; }
 
     async function request(method, path, body) {
         const opts = {
             method,
             headers: { 'Content-Type': 'application/json' }
         };
+        if (_token && _token !== 'disabled') {
+            opts.headers['Authorization'] = 'Bearer ' + _token;
+        }
         if (body) opts.body = JSON.stringify(body);
         const res = await fetch(BASE + path, opts);
         const text = await res.text();
@@ -23,6 +39,13 @@ const JoltAPI = (() => {
     }
 
     return {
+        // Auth
+        setToken,
+        getToken,
+        login: (username, password) => request('POST', '/api/auth/login', { username, password }),
+        authStatus: () => request('GET', '/api/auth/status'),
+        logout: () => { setToken(null); },
+
         // Health
         health: () => request('GET', '/api/health'),
 
@@ -39,16 +62,16 @@ const JoltAPI = (() => {
         classSource: (className) => request('GET', '/api/classes/' + encodeURIComponent(className) + '/source'),
 
         // Hot-Swap
-        compile: (className, source) => request('POST', '/api/compile', { className, source }),
-        hotswap: (className, source) => request('POST', '/api/hotswap', { className, source }),
-        rollback: (className) => request('POST', '/api/rollback', { className }),
+        compile: (className, sourceCode) => request('POST', '/api/compile', { className, sourceCode }),
+        hotswap: (className, sourceCode, reason) => request('POST', '/api/hotswap', { className, sourceCode, ...(reason ? { reason } : {}) }),
+        rollback: (className, reason) => request('POST', '/api/rollback', { className, ...(reason ? { reason } : {}) }),
         hotswapHistory: () => request('GET', '/api/hotswap/history'),
 
         // Tracing
         traceStart: (body) => request('POST', '/api/trace/start', body),
         traceStop: (body) => request('POST', '/api/trace/stop', body || {}),
         traceRecords: (limit) => request('GET', '/api/trace/records' + (limit ? '?limit=' + limit : '')),
-        traceFlameGraph: () => request('GET', '/api/trace/flamegraph'),
+        traceFlameGraph: (view) => request('GET', '/api/trace/flamegraph' + (view ? '?view=' + encodeURIComponent(view) : '')),
         traceStatus: () => request('GET', '/api/trace/status'),
 
         // Spring
@@ -69,6 +92,9 @@ const JoltAPI = (() => {
             return request('GET', '/api/spring/mappings?' + params.toString());
         },
         springDependencies: () => request('GET', '/api/spring/dependencies'),
-        springDependencyChain: (name) => request('GET', '/api/spring/dependencies/' + encodeURIComponent(name))
+        springDependencyChain: (name) => request('GET', '/api/spring/dependencies/' + encodeURIComponent(name)),
+
+        // Audit
+        auditExport: (format) => request('GET', '/api/audit/export' + (format ? '?format=' + format : ''))
     };
 })();

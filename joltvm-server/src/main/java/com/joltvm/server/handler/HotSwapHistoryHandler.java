@@ -80,6 +80,9 @@ public class HotSwapHistoryHandler implements RouteHandler {
             m.put("status", r.status().name());
             m.put("message", r.message());
             m.put("timestamp", r.timestamp().toString());
+            if (r.operator() != null) m.put("operator", r.operator());
+            if (r.reason() != null) m.put("reason", r.reason());
+            if (r.diff() != null) m.put("diff", r.diff());
             return m;
         }).toList();
 

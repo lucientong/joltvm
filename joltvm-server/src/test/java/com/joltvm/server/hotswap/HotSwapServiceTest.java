@@ -325,6 +325,7 @@ class HotSwapServiceTest {
      * Stub Instrumentation that returns a controlled set of classes.
      * By default, supports redefine and treats all classes as modifiable.
      */
+    @SuppressWarnings("rawtypes")
     private static class StubInstrumentation implements Instrumentation {
 
         @Override

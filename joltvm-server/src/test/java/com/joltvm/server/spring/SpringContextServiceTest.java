@@ -26,7 +26,6 @@ import org.junit.jupiter.api.Test;
 import java.lang.instrument.ClassDefinition;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
-import java.lang.instrument.UnmodifiableClassException;
 import java.util.List;
 import java.util.Map;
 import java.util.jar.JarFile;
@@ -248,6 +247,7 @@ class SpringContextServiceTest {
     /**
      * Stub Instrumentation that returns a small set of non-Spring classes.
      */
+    @SuppressWarnings("rawtypes")
     private static class StubInstrumentation implements Instrumentation {
 
         @Override

@@ -193,6 +193,7 @@ class RollbackHandlerTest {
     /**
      * Stub Instrumentation.
      */
+    @SuppressWarnings("rawtypes")
     private static class StubInstrumentation implements Instrumentation {
 
         @Override

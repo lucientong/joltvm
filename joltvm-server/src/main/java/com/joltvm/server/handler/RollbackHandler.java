@@ -21,6 +21,7 @@ import com.joltvm.server.HttpResponseHelper;
 import com.joltvm.server.RouteHandler;
 import com.joltvm.server.hotswap.HotSwapRecord;
 import com.joltvm.server.hotswap.HotSwapService;
+import com.joltvm.server.security.AuditLogService;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
@@ -79,8 +80,17 @@ public class RollbackHandler implements RouteHandler {
                     "Field 'className' is required");
         }
 
+        String reason = bodyMap.get("reason") instanceof String r ? r : null;
+        String operator = extractOperator(request);
+
         try {
-            HotSwapRecord record = hotSwapService.rollback(className);
+            HotSwapRecord record = hotSwapService.rollback(className, operator, reason);
+
+            // Record to audit log if available
+            AuditLogService auditLogService = com.joltvm.server.APIRoutes.getAuditLogService();
+            if (auditLogService != null) {
+                auditLogService.record(record);
+            }
 
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("success", record.status() == HotSwapRecord.Status.SUCCESS);
@@ -100,6 +110,28 @@ public class RollbackHandler implements RouteHandler {
             LOG.log(Level.WARNING, "Rollback error for " + className, e);
             return HttpResponseHelper.error(HttpResponseStatus.INTERNAL_SERVER_ERROR,
                     "Rollback error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Extracts the operator username from the Authorization Bearer token.
+     */
+    private static String extractOperator(FullHttpRequest request) {
+        String authHeader = request.headers().get("Authorization");
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return null;
+        }
+        String token = authHeader.substring(7);
+        try {
+            String[] parts = token.split("\\.", 2);
+            if (parts.length < 1) return null;
+            String payload = new String(
+                    java.util.Base64.getUrlDecoder().decode(parts[0]),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            String[] fields = payload.split(":", 3);
+            return fields.length > 0 ? fields[0] : null;
+        } catch (Exception e) {
+            return null;
         }
     }
 }

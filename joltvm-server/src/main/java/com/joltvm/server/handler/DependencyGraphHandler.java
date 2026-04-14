@@ -25,7 +25,6 @@ import io.netty.handler.codec.http.FullHttpResponse;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
 
 /**
  * Handler for {@code GET /api/spring/dependencies} — returns the full dependency
@@ -56,7 +55,6 @@ import java.util.logging.Logger;
  */
 public final class DependencyGraphHandler implements RouteHandler {
 
-    private static final Logger LOG = Logger.getLogger(DependencyGraphHandler.class.getName());
 
     private final SpringContextService springService;
 

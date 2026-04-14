@@ -16,6 +16,8 @@
 
 package com.joltvm.server;
 
+import com.joltvm.server.handler.AuditExportHandler;
+import com.joltvm.server.handler.AuthStatusHandler;
 import com.joltvm.server.handler.BeanDetailHandler;
 import com.joltvm.server.handler.BeanListHandler;
 import com.joltvm.server.handler.ClassDetailHandler;
@@ -27,6 +29,7 @@ import com.joltvm.server.handler.DependencyGraphHandler;
 import com.joltvm.server.handler.HealthHandler;
 import com.joltvm.server.handler.HotSwapHandler;
 import com.joltvm.server.handler.HotSwapHistoryHandler;
+import com.joltvm.server.handler.LoginHandler;
 import com.joltvm.server.handler.RequestMappingHandler;
 import com.joltvm.server.handler.RollbackHandler;
 import com.joltvm.server.handler.TraceFlameGraphHandler;
@@ -34,6 +37,9 @@ import com.joltvm.server.handler.TraceHandler;
 import com.joltvm.server.handler.TraceListHandler;
 import com.joltvm.server.handler.TraceStatusHandler;
 import com.joltvm.server.hotswap.HotSwapService;
+import com.joltvm.server.security.AuditLogService;
+import com.joltvm.server.security.SecurityConfig;
+import com.joltvm.server.security.TokenService;
 import com.joltvm.server.spring.SpringContextService;
 import com.joltvm.server.tracing.MethodTraceService;
 import io.netty.handler.codec.http.HttpMethod;
@@ -59,14 +65,40 @@ public final class APIRoutes {
     private static final Logger LOG = Logger.getLogger(APIRoutes.class.getName());
 
     /** Total number of registered API endpoints. */
-    static final int ROUTE_COUNT = 18;
+    static final int ROUTE_COUNT = 21;
+
+    private static volatile AuditLogService auditLogServiceInstance;
 
     private APIRoutes() {
         // Utility class — no instantiation
     }
 
     /**
-     * Registers all API endpoints on the given router.
+     * Returns the shared {@link AuditLogService} singleton.
+     *
+     * <p>Available after {@link #registerAll(HttpRouter, SecurityConfig, TokenService)}
+     * has been called. Returns {@code null} if routes have not been registered yet.
+     *
+     * @return the audit log service, or {@code null}
+     */
+    public static AuditLogService getAuditLogService() {
+        return auditLogServiceInstance;
+    }
+
+    /**
+     * Registers all API endpoints on the given router (security disabled).
+     *
+     * <p>Convenience overload that creates default {@link SecurityConfig} and
+     * {@link TokenService} instances.
+     *
+     * @param router the HTTP router to register routes on
+     */
+    public static void registerAll(HttpRouter router) {
+        registerAll(router, new SecurityConfig(), new TokenService());
+    }
+
+    /**
+     * Registers all API endpoints on the given router with security support.
      *
      * <p>Creates shared service instances and wires them into the appropriate handlers:
      * <ul>
@@ -75,15 +107,22 @@ public final class APIRoutes {
      *       TraceFlameGraphHandler, TraceStatusHandler</li>
      *   <li>{@link SpringContextService} — shared by BeanListHandler, BeanDetailHandler,
      *       RequestMappingHandler, DependencyChainHandler, DependencyGraphHandler</li>
+     *   <li>{@link AuditLogService} — shared by AuditExportHandler</li>
+     *   <li>{@link SecurityConfig} + {@link TokenService} — shared by LoginHandler, AuthStatusHandler</li>
      * </ul>
      *
-     * @param router the HTTP router to register routes on
+     * @param router         the HTTP router to register routes on
+     * @param securityConfig the security configuration
+     * @param tokenService   the token service
      */
-    public static void registerAll(HttpRouter router) {
+    public static void registerAll(HttpRouter router, SecurityConfig securityConfig,
+                                   TokenService tokenService) {
         // Shared service singletons
         HotSwapService hotSwapService = new HotSwapService();
         MethodTraceService traceService = new MethodTraceService();
         SpringContextService springService = new SpringContextService();
+        AuditLogService auditLogService = new AuditLogService();
+        auditLogServiceInstance = auditLogService;
 
         router.addRoute(HttpMethod.GET, "/api/health", new HealthHandler());
 
@@ -107,6 +146,11 @@ public final class APIRoutes {
         router.addRoute(HttpMethod.GET, "/api/spring/mappings", new RequestMappingHandler(springService));
         router.addRoute(HttpMethod.GET, "/api/spring/dependencies", new DependencyGraphHandler(springService));
         router.addRoute(HttpMethod.GET, "/api/spring/dependencies/{beanName}", new DependencyChainHandler(springService));
+
+        // Security & audit endpoints
+        router.addRoute(HttpMethod.POST, "/api/auth/login", new LoginHandler(securityConfig, tokenService));
+        router.addRoute(HttpMethod.GET, "/api/auth/status", new AuthStatusHandler(securityConfig, tokenService));
+        router.addRoute(HttpMethod.GET, "/api/audit/export", new AuditExportHandler(auditLogService));
 
         LOG.info("Registered " + ROUTE_COUNT + " API routes");
     }

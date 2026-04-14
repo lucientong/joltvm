@@ -21,7 +21,9 @@ import com.joltvm.server.RouteHandler;
 import com.joltvm.server.tracing.MethodTraceService;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.QueryStringDecoder;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -38,10 +40,12 @@ import java.util.Map;
  * }
  * </pre>
  *
- * <p>The data source depends on what tracing mode was used:
+ * <p>The data source depends on what tracing mode was used, or can be controlled via the
+ * optional {@code ?view=} query parameter:
  * <ul>
- *   <li>If stack samples are available, uses sample-based aggregation (count-based).</li>
- *   <li>Otherwise, uses trace-record-based aggregation (duration in microseconds).</li>
+ *   <li>{@code cpu} — forces stack-sample-based aggregation (CPU time perspective)</li>
+ *   <li>{@code wall} — forces trace-record-based aggregation (wall-clock duration)</li>
+ *   <li>(none) — auto-selects: samples if available, else trace records</li>
  * </ul>
  */
 public class TraceFlameGraphHandler implements RouteHandler {
@@ -54,7 +58,13 @@ public class TraceFlameGraphHandler implements RouteHandler {
 
     @Override
     public FullHttpResponse handle(FullHttpRequest request, Map<String, String> pathParams) {
-        Map<String, Object> flameGraphData = traceService.getCollector().getFlameGraphData();
+        QueryStringDecoder qsd = new QueryStringDecoder(request.uri());
+        List<String> viewParam = qsd.parameters().get("view");
+        String view = (viewParam != null && !viewParam.isEmpty()) ? viewParam.get(0) : null;
+
+        Map<String, Object> flameGraphData = (view != null)
+                ? traceService.getCollector().getFlameGraphData(view)
+                : traceService.getCollector().getFlameGraphData();
         return HttpResponseHelper.json(flameGraphData);
     }
 }

@@ -72,6 +72,7 @@
                 <input type="text" class="search-input" id="hotswapClassName" placeholder="Class name (e.g., com.example.MyService)">
                 <button class="btn btn-primary" id="loadSourceBtn">Load Source</button>
                 <button class="btn" id="compileBtn" disabled>Compile</button>
+                <input type="text" class="search-input" id="hotswapReason" placeholder="Reason (optional)" style="width:200px">
                 <button class="btn btn-warning" id="hotswapBtn" disabled>Hot-Swap</button>
                 <button class="btn btn-danger" id="rollbackBtn" disabled>Rollback</button>
             </div>
@@ -84,6 +85,12 @@
         <!-- Flame Graph View -->
         <section class="view" id="view-trace">
             <div class="toolbar">
+                <div class="btn-group" id="flameViewGroup" style="display:inline-flex;gap:0">
+                    <button class="btn btn-view active" data-view="auto" title="Auto (samples if available, else trace)">Auto</button>
+                    <button class="btn btn-view" data-view="cpu" title="CPU view: stack sampling data">CPU</button>
+                    <button class="btn btn-view" data-view="wall" title="Wall time: method trace duration">Wall</button>
+                    <button class="btn btn-view" data-view="alloc" title="Allocation: not yet available" disabled style="opacity:0.45;cursor:not-allowed">Alloc</button>
+                </div>
                 <select id="traceType" class="search-input" style="width:auto">
                     <option value="trace">Method Trace</option>
                     <option value="sample">Stack Sample</option>
@@ -94,6 +101,9 @@
                 <button class="btn btn-primary" id="startTraceBtn">Start</button>
                 <button class="btn btn-danger" id="stopTraceBtn" disabled>Stop</button>
                 <button class="btn" id="refreshFlameBtn">Refresh Graph</button>
+                <input type="text" class="search-input" id="flameSearchInput" placeholder="Search methods..." style="width:180px">
+                <button class="btn" id="flameSearchBtn">Search</button>
+                <button class="btn" id="flameClearSearchBtn" title="Clear search">&#x2715;</button>
             </div>
             <div class="trace-status" id="traceStatus"></div>
             <div class="flamegraph-container" id="flamegraphContainer">
@@ -130,6 +140,8 @@
         <section class="view" id="view-audit">
             <div class="toolbar">
                 <button class="btn" id="auditRefresh">Refresh</button>
+                <button class="btn" id="auditExportJson">Export JSON</button>
+                <button class="btn" id="auditExportCsv">Export CSV</button>
             </div>
             <div class="audit-list" id="auditList">
                 <div class="placeholder-msg">Loading audit log...</div>

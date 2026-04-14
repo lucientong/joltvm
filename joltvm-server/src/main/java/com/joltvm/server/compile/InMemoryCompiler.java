@@ -153,7 +153,6 @@ public class InMemoryCompiler {
      * In-memory compiled class file that captures bytecode to a byte array.
      */
     private static final class InMemoryClassFile extends SimpleJavaFileObject {
-        private final ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
         private final String className;
         private final Map<String, byte[]> bytecodeMap;
 

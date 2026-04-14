@@ -29,6 +29,8 @@ import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.stream.ChunkedWriteHandler;
 
 import com.joltvm.server.handler.StaticFileHandler;
+import com.joltvm.server.security.SecurityConfig;
+import com.joltvm.server.security.TokenService;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -71,6 +73,8 @@ public final class JoltVMServer {
     private final int port;
     private final HttpRouter router;
     private final StaticFileHandler staticFileHandler;
+    private final SecurityConfig securityConfig;
+    private final TokenService tokenService;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     private EventLoopGroup bossGroup;
@@ -78,25 +82,38 @@ public final class JoltVMServer {
     private Channel serverChannel;
 
     /**
-     * Creates a server on the default port ({@value DEFAULT_PORT}).
+     * Creates a server on the default port ({@value DEFAULT_PORT}) with security disabled.
      */
     public JoltVMServer() {
         this(DEFAULT_PORT);
     }
 
     /**
-     * Creates a server on the specified port.
+     * Creates a server on the specified port with security disabled.
      *
      * @param port the TCP port to listen on (must be 1–65535)
      * @throws IllegalArgumentException if port is out of range
      */
     public JoltVMServer(int port) {
+        this(port, new SecurityConfig(), new TokenService());
+    }
+
+    /**
+     * Creates a server with explicit security configuration.
+     *
+     * @param port           the TCP port to listen on
+     * @param securityConfig the security configuration
+     * @param tokenService   the token service
+     */
+    public JoltVMServer(int port, SecurityConfig securityConfig, TokenService tokenService) {
         if (port < 1 || port > 65535) {
             throw new IllegalArgumentException("Port must be between 1 and 65535, got: " + port);
         }
         this.port = port;
         this.router = new HttpRouter();
         this.staticFileHandler = new StaticFileHandler();
+        this.securityConfig = Objects.requireNonNull(securityConfig, "securityConfig");
+        this.tokenService = Objects.requireNonNull(tokenService, "tokenService");
     }
 
     /**
@@ -129,7 +146,8 @@ public final class JoltVMServer {
                                     new HttpServerCodec(),
                                     new HttpObjectAggregator(MAX_CONTENT_LENGTH),
                                     new ChunkedWriteHandler(),
-                                    new HttpDispatcherHandler(router, staticFileHandler)
+                                    new HttpDispatcherHandler(router, staticFileHandler,
+                                            securityConfig, tokenService)
                             );
                         }
                     });
@@ -194,6 +212,24 @@ public final class JoltVMServer {
      */
     public HttpRouter getRouter() {
         return router;
+    }
+
+    /**
+     * Returns the security configuration.
+     *
+     * @return the security config
+     */
+    public SecurityConfig getSecurityConfig() {
+        return securityConfig;
+    }
+
+    /**
+     * Returns the token service.
+     *
+     * @return the token service
+     */
+    public TokenService getTokenService() {
+        return tokenService;
     }
 
     private static void shutdown(EventLoopGroup... groups) {

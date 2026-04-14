@@ -171,6 +171,14 @@ Can-Set-Native-Method-Prefix: true
 | `RequestMappingHandler` | `GET /api/spring/mappings` — URL → 方法请求映射，支持 HTTP 方法和搜索过滤。 |
 | `DependencyChainHandler` | `GET /api/spring/dependencies/{beanName}` — 单个 Bean 的递归依赖注入链。 |
 | `DependencyGraphHandler` | `GET /api/spring/dependencies` — 所有 stereotype Bean 的完整依赖图。 |
+| `Role` | RBAC 角色枚举，三级层次：Viewer (1) < Operator (2) < Admin (3)。提供 `hasPermission()` 实现向上兼容的权限检查。 |
+| `SecurityConfig` | 认证配置与用户管理。基于 `ConcurrentHashMap` 的凭证存储，默认管理员账号（`admin/joltvm`），支持运行时启用/禁用切换。 |
+| `TokenService` | HMAC-SHA256 令牌生成与验证。`SecureRandom` 32 字节密钥，Base64 载荷，默认 24h 过期，内存活跃令牌追踪，常量时间签名比较防止计时攻击。 |
+| `RoutePermissions` | API 端点 → 最低 `Role` 映射。19 条权限规则，支持精确匹配、前缀匹配和免鉴权端点。 |
+| `AuditLogService` | 审计日志服务，内存 `CopyOnWriteArrayList`（最多 1000 条）+ 可选 JSON Lines 文件持久化。记录热替换操作和安全事件，支持 JSON Lines 和 CSV 导出。 |
+| `LoginHandler` | `POST /api/auth/login` — 验证用户名/密码，返回含角色信息的 HMAC 令牌。 |
+| `AuthStatusHandler` | `GET /api/auth/status` — 返回当前认证状态及已认证用户信息。 |
+| `AuditExportHandler` | `GET /api/audit/export` — 以 JSON Lines 或 CSV 格式导出审计日志。需要 ADMIN 角色。 |
 
 #### REST API 端点
 
@@ -181,7 +189,7 @@ Can-Set-Native-Method-Prefix: true
 | GET | `/api/classes/{className}` | 类详情（字段、方法、父类） |
 | GET | `/api/classes/{className}/source` | 反编译的 Java 源码 |
 | POST | `/api/compile` | 内存中编译 Java 源码 |
-| POST | `/api/hotswap` | 编译 + 热替换类 |
+| POST | `/api/hotswap` | 编译 + 热替换类（支持 operator/reason 审计字段） |
 | POST | `/api/rollback` | 回滚已热替换的类 |
 | GET | `/api/hotswap/history` | 热替换操作历史 |
 | POST | `/api/trace/start` | 启动方法追踪或栈采样 |
@@ -194,6 +202,9 @@ Can-Set-Native-Method-Prefix: true
 | GET | `/api/spring/mappings` | URL → 方法请求映射 |
 | GET | `/api/spring/dependencies` | 完整依赖图（Controller→Service→Repository） |
 | GET | `/api/spring/dependencies/{beanName}` | 单个 Bean 的依赖链 |
+| POST | `/api/auth/login` | 用户名/密码认证，返回 HMAC 令牌 |
+| GET | `/api/auth/status` | 查询当前认证状态 |
+| GET | `/api/audit/export` | 导出审计日志（JSON Lines 或 CSV，需 ADMIN 角色） |
 
 **设计考虑**：
 - 选择 Netty 是因为其极小的内存占用和零外部依赖
@@ -638,31 +649,68 @@ JoltVM 的设计目标是最小化对目标应用的影响：
 
 ## 安全模型
 
-*（Phase 5+ — 仅设计）*
+*（Phase 7 — 已实现）*
 
 ```
-┌─────────────────────────────────┐
-│         安全层                   │
-├─────────────────────────────────┤
-│ 身份认证                        │
-│  ├── 令牌认证（内置）            │
-│  └── SSO/LDAP（企业集成）       │
-├─────────────────────────────────┤
-│ 权限控制 (RBAC)                 │
-│  ├── Viewer: 只读访问           │
-│  ├── Operator: 热修复 + 追踪   │
-│  └── Admin: 完全访问            │
-├─────────────────────────────────┤
-│ 审计追踪                        │
-│  ├── 每次热修复 → diff 日志     │
-│  ├── 时间戳 + 操作人 + 原因    │
-│  └── 不可篡改 + 可导出          │
-├─────────────────────────────────┤
-│ 审批工作流（可选）               │
-│  └── 热修复需经管理员审批       │
-│      方可生效                   │
-└─────────────────────────────────┘
+HTTP 请求 → HttpDispatcherHandler（认证中间件）
+                 ├── RoutePermissions.getRequiredRole(method, path)
+                 │     ├── null → 无需鉴权（登录、静态文件）
+                 │     └── Role → 需要认证
+                 ├── 从 Authorization 头提取 Bearer 令牌
+                 ├── TokenService.validateToken(token)
+                 │     ├── null → 401 Unauthorized
+                 │     └── TokenInfo → 检查角色权限
+                 ├── role.hasPermission(required)?
+                 │     ├── false → 403 Forbidden
+                 │     └── true → 继续到路由处理器
+                 └── 路由到对应处理器
+                       ├── LoginHandler (POST /api/auth/login)
+                       ├── AuthStatusHandler (GET /api/auth/status)
+                       ├── AuditExportHandler (GET /api/audit/export)
+                       └── ... 其他业务处理器
 ```
+
+### 核心组件
+
+| 组件 | 职责 |
+|------|------|
+| `Role` | 三级 RBAC：Viewer（只读）< Operator（热修复 + 追踪）< Admin（完全访问） |
+| `SecurityConfig` | 用户管理、凭证验证、运行时启用/禁用 |
+| `TokenService` | HMAC-SHA256 令牌生成/验证，24h 过期，常量时间比较 |
+| `RoutePermissions` | API 端点 → 最低角色映射，免鉴权端点白名单 |
+| `AuditLogService` | 不可篡改审计日志，文件持久化，支持 JSON/CSV 导出 |
+
+### 权限矩阵
+
+| 端点 | 方法 | 所需角色 |
+|------|------|---------|
+| `/api/auth/login` | POST | *（无 — 公开）* |
+| `/api/auth/status` | GET | *（无 — 公开）* |
+| 静态文件（`/`、`/css/*`、`/js/*`） | GET | *（无 — 公开）* |
+| `/api/health` | GET | VIEWER |
+| `/api/classes`、`/api/classes/{name}` | GET | VIEWER |
+| `/api/hotswap/history` | GET | VIEWER |
+| `/api/trace/records`、`/api/trace/flamegraph`、`/api/trace/status` | GET | VIEWER |
+| `/api/spring/beans`、`/api/spring/mappings`、`/api/spring/dependencies` | GET | VIEWER |
+| `/api/compile` | POST | OPERATOR |
+| `/api/hotswap`、`/api/rollback` | POST | OPERATOR |
+| `/api/trace/start`、`/api/trace/stop` | POST | OPERATOR |
+| `/api/audit/export` | GET | ADMIN |
+
+### 令牌格式
+
+```
+base64url(username:role:expirationEpochSeconds).base64url(HMAC-SHA256-signature)
+```
+
+- **密钥**：每次 JVM 会话由 `SecureRandom` 生成 32 字节随机密钥
+- **过期**：可配置，默认 24 小时
+- **签名验证**：常量时间比较，防止计时攻击
+- **活跃令牌追踪**：内存 `ConcurrentHashMap`，支持即时失效
+
+### 安全开关
+
+安全功能可通过 `SecurityConfig.setEnabled(false)` 完全禁用。禁用时所有请求无需认证即可访问 — 适用于开发环境。
 
 ---
 
@@ -707,16 +755,16 @@ joltvm/
 │           ├── InstrumentationHolderTest.java
 │           └── AttachHelperTest.java       # 15 个测试（PID 验证等）
 │
-├── joltvm-server/                  # ── 嵌入式 Web 服务器（Phase 2–6）──
+├── joltvm-server/                  # ── 嵌入式 Web 服务器（Phase 2–7）──
 │   ├── build.gradle.kts
 │   └── src/
 │       ├── main/java/com/joltvm/server/
 │       │   ├── JoltVMServer.java           # Netty HTTP 服务器生命周期
 │       │   ├── HttpRouter.java             # 路径模式匹配 + 参数
-│       │   ├── HttpDispatcherHandler.java  # 请求分发 + CORS + 静态文件回退
+│       │   ├── HttpDispatcherHandler.java  # 请求分发 + CORS + 认证中间件 + 静态文件回退
 │       │   ├── HttpResponseHelper.java     # JSON/文本响应构建器
 │       │   ├── RouteHandler.java           # 函数式路由处理器接口
-│       │   ├── APIRoutes.java              # API 路由注册（18 个路由）
+│       │   ├── APIRoutes.java              # API 路由注册（21 个路由）
 │       │   ├── handler/
 │       │   │   ├── HealthHandler.java      # GET /api/health
 │       │   │   ├── ClassListHandler.java   # GET /api/classes
@@ -736,7 +784,10 @@ joltvm/
 │       │   │   ├── BeanDetailHandler.java  # GET /api/spring/beans/{beanName}
 │       │   │   ├── RequestMappingHandler.java # GET /api/spring/mappings
 │       │   │   ├── DependencyGraphHandler.java # GET /api/spring/dependencies
-│       │   │   └── DependencyChainHandler.java # GET /api/spring/dependencies/{beanName}
+│       │   │   ├── DependencyChainHandler.java # GET /api/spring/dependencies/{beanName}
+│       │   │   ├── LoginHandler.java       # POST /api/auth/login
+│       │   │   ├── AuthStatusHandler.java  # GET /api/auth/status
+│       │   │   └── AuditExportHandler.java # GET /api/audit/export
 │       │   ├── compile/
 │       │   │   ├── InMemoryCompiler.java   # javax.tools 内存中编译
 │       │   │   ├── CompileResult.java      # 编译结果 record
@@ -757,6 +808,13 @@ joltvm/
 │       │   │   └── TracingException.java   # 追踪异常
 │       │   ├── spring/
 │       │   │   ├── SpringContextService.java # Spring 上下文发现 + Bean 分析
+│       │   │   └── package-info.java
+│       │   ├── security/
+│       │   │   ├── Role.java               # RBAC 角色（Viewer/Operator/Admin）
+│       │   │   ├── SecurityConfig.java     # 认证配置 + 用户管理
+│       │   │   ├── TokenService.java       # HMAC-SHA256 令牌生成/验证
+│       │   │   ├── RoutePermissions.java   # API 端点 → 角色映射
+│       │   │   ├── AuditLogService.java    # 审计日志持久化 + 导出
 │       │   │   └── package-info.java
 │       │   └── package-info.java
 │       ├── main/resources/webui/            # ── 嵌入式 Web UI 资源 ──
@@ -802,9 +860,15 @@ joltvm/
 │           │   ├── FlameGraphCollectorTest.java
 │           │   ├── FlameGraphNodeTest.java
 │           │   └── TraceRecordTest.java
-│           └── spring/
-│               ├── SpringContextServiceTest.java
-│               └── StubSpringContextService.java
+│           ├── spring/
+│           │   ├── SpringContextServiceTest.java
+│           │   └── StubSpringContextService.java
+│           └── security/
+│               ├── RoleTest.java
+│               ├── SecurityConfigTest.java
+│               ├── TokenServiceTest.java
+│               ├── AuditLogServiceTest.java
+│               └── RoutePermissionsTest.java
 │
 ├── joltvm-cli/                     # ── 命令行工具 ──
 │   ├── build.gradle.kts            # Shadow JAR + processResources 版本注入
@@ -841,7 +905,8 @@ joltvm/
 | **Phase 4** | 方法追踪 + 火焰图数据 | Byte Buddy Advice、栈采样 | ✅ 已完成 |
 | **Phase 5** | Spring Boot 感知 | Spring `ApplicationContext`、`RequestMappingHandlerMapping` | ✅ 已完成 |
 | **Phase 6** | Web UI | 原生 JS、Monaco Editor (CDN)、d3-flame-graph (CDN) | ✅ 已完成 |
+| **Phase 7** | 安全审计（RBAC + 令牌认证 + 审计日志 + 导出） | HMAC-SHA256、`ConcurrentHashMap`、JSON Lines | ✅ 已完成 |
 
 ---
 
-*最后更新：2026-04-11*
+*最后更新：2026-04-14*

@@ -198,6 +198,29 @@ public class FlameGraphCollector {
     }
 
     /**
+     * Returns the flame graph data for a specific view type.
+     *
+     * <p>Supported view types:
+     * <ul>
+     *   <li>{@code "cpu"} — stack-sample-based aggregation (CPU time perspective)</li>
+     *   <li>{@code "wall"} — trace-record-based aggregation (wall-clock duration)</li>
+     * </ul>
+     * Falls back to {@link #getFlameGraphData()} for unknown view types.
+     *
+     * @param view the view type ("cpu" or "wall")
+     * @return the flame graph data as a nested map
+     */
+    public Map<String, Object> getFlameGraphData(String view) {
+        if ("cpu".equalsIgnoreCase(view)) {
+            return buildFlameGraphFromSamples().toMap();
+        }
+        if ("wall".equalsIgnoreCase(view)) {
+            return buildFlameGraphFromRecords().toMap();
+        }
+        return getFlameGraphData();
+    }
+
+    /**
      * Clears all collected records and samples.
      */
     public void clear() {

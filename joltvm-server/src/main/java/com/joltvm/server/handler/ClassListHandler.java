@@ -31,7 +31,6 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
 
 /**
  * Handler for {@code GET /api/classes} — lists all loaded classes in the target JVM.
@@ -66,7 +65,6 @@ import java.util.logging.Logger;
  */
 public final class ClassListHandler implements RouteHandler {
 
-    private static final Logger LOG = Logger.getLogger(ClassListHandler.class.getName());
 
     private static final int DEFAULT_PAGE_SIZE = 100;
     private static final int MAX_PAGE_SIZE = 1000;

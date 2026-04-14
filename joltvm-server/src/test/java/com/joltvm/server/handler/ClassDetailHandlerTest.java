@@ -172,6 +172,7 @@ class ClassDetailHandlerTest {
     /**
      * Stub Instrumentation that returns a controlled set of classes.
      */
+    @SuppressWarnings("rawtypes")
     private static class StubInstrumentation implements Instrumentation {
 
         @Override

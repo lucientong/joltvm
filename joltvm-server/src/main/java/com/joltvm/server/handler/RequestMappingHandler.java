@@ -26,7 +26,6 @@ import io.netty.handler.codec.http.QueryStringDecoder;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
 
 /**
  * Handler for {@code GET /api/spring/mappings} — lists all URL → method mappings.
@@ -61,7 +60,6 @@ import java.util.logging.Logger;
  */
 public final class RequestMappingHandler implements RouteHandler {
 
-    private static final Logger LOG = Logger.getLogger(RequestMappingHandler.class.getName());
 
     private final SpringContextService springService;
 

@@ -23,9 +23,7 @@ import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.logging.Logger;
 
 /**
  * Handler for {@code GET /api/spring/beans/{beanName}} — returns detailed info about a Spring bean.
@@ -55,7 +53,6 @@ import java.util.logging.Logger;
  */
 public final class BeanDetailHandler implements RouteHandler {
 
-    private static final Logger LOG = Logger.getLogger(BeanDetailHandler.class.getName());
 
     private final SpringContextService springService;
 

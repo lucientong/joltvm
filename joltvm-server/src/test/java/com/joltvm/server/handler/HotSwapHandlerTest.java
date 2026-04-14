@@ -177,16 +177,6 @@ class HotSwapHandlerTest {
 
         // Use a class that exists on the classpath — compile a valid source
         // The hot-swap will succeed because StubInstrumentation.redefineClasses is a no-op
-        String sourceCode = """
-                package java.lang;
-                public final class String implements java.io.Serializable, Comparable<String>, CharSequence {
-                    public String toString() { return this; }
-                }
-                """;
-        // This won't actually compile correctly due to java.lang restrictions,
-        // so let's test with a simpler approach — verify the compile step works separately
-        // and focus on the handler's behavior when given a class not found among loaded classes
-
         // Test that a valid compilation that results in a class not found among loaded classes
         // returns a 500 because the hot-swap phase fails
         String validSource = """
@@ -219,6 +209,7 @@ class HotSwapHandlerTest {
     /**
      * Stub Instrumentation.
      */
+    @SuppressWarnings("rawtypes")
     private static class StubInstrumentation implements Instrumentation {
 
         @Override

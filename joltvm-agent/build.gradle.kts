@@ -66,4 +66,5 @@ tasks.shadowJar {
     relocate("org.objectweb.asm", "com.joltvm.shaded.asm")
     relocate("io.netty", "com.joltvm.shaded.netty")
     relocate("org.benf.cfr", "com.joltvm.shaded.cfr")
+    relocate("com.github.difflib", "com.joltvm.shaded.difflib")
 }

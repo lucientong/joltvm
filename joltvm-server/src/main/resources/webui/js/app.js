@@ -6,6 +6,111 @@
     'use strict';
 
     // ================================================================
+    // Auth / Login
+    // ================================================================
+    let currentUser = null;
+
+    function createLoginOverlay() {
+        const overlay = document.createElement('div');
+        overlay.id = 'loginOverlay';
+        overlay.className = 'login-overlay';
+        overlay.innerHTML = `
+            <div class="login-card">
+                <div class="login-logo">⚡ <span>JoltVM</span></div>
+                <h3>Authentication Required</h3>
+                <div class="login-form">
+                    <input type="text" id="loginUsername" class="search-input" placeholder="Username" autocomplete="username">
+                    <input type="password" id="loginPassword" class="search-input" placeholder="Password" autocomplete="current-password">
+                    <button class="btn btn-primary" id="loginBtn" style="width:100%;margin-top:8px">Sign In</button>
+                    <div id="loginError" class="login-error" style="display:none"></div>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        document.getElementById('loginBtn').addEventListener('click', doLogin);
+        document.getElementById('loginPassword').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') doLogin();
+        });
+        document.getElementById('loginUsername').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') document.getElementById('loginPassword').focus();
+        });
+    }
+
+    async function doLogin() {
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value;
+        const errEl = document.getElementById('loginError');
+        errEl.style.display = 'none';
+
+        if (!username || !password) {
+            errEl.textContent = 'Please enter username and password';
+            errEl.style.display = 'block';
+            return;
+        }
+
+        const res = await JoltAPI.login(username, password);
+        if (res.ok && res.data.token) {
+            JoltAPI.setToken(res.data.token);
+            currentUser = { username: res.data.username, role: res.data.role };
+            hideLoginOverlay();
+            updateUserDisplay();
+            loadDashboard();
+        } else {
+            errEl.textContent = errMsg(res.data);
+            errEl.style.display = 'block';
+        }
+    }
+
+    function hideLoginOverlay() {
+        const overlay = document.getElementById('loginOverlay');
+        if (overlay) overlay.remove();
+    }
+
+    function updateUserDisplay() {
+        const status = document.getElementById('statusIndicator');
+        if (currentUser) {
+            const badge = document.getElementById('userBadge');
+            if (badge) {
+                badge.textContent = currentUser.username + ' [' + currentUser.role + ']';
+            } else {
+                const span = document.createElement('span');
+                span.id = 'userBadge';
+                span.className = 'user-badge';
+                span.textContent = currentUser.username + ' [' + currentUser.role + ']';
+                span.title = 'Click to logout';
+                span.style.cursor = 'pointer';
+                span.addEventListener('click', () => {
+                    JoltAPI.logout();
+                    currentUser = null;
+                    checkAuth();
+                });
+                status.parentElement.insertBefore(span, status);
+            }
+        }
+    }
+
+    async function checkAuth() {
+        const res = await JoltAPI.authStatus();
+        if (res.ok && res.data) {
+            if (!res.data.authEnabled) {
+                // Auth disabled — proceed normally
+                currentUser = { username: 'anonymous', role: 'ADMIN' };
+                updateUserDisplay();
+                loadDashboard();
+                return;
+            }
+            if (res.data.authenticated) {
+                currentUser = { username: res.data.username, role: res.data.role };
+                updateUserDisplay();
+                loadDashboard();
+                return;
+            }
+        }
+        // Need login
+        createLoginOverlay();
+    }
+
+    // ================================================================
     // Toast Notifications
     // ================================================================
     const toastContainer = document.createElement('div');
@@ -274,9 +379,10 @@
         if (!currentEditClass) return;
         const source = getEditorContent();
         if (!source) return;
+        const reason = (document.getElementById('hotswapReason').value || '').trim() || undefined;
 
         setEditorStatus('Hot-swapping ' + currentEditClass + '...');
-        const res = await JoltAPI.hotswap(currentEditClass, source);
+        const res = await JoltAPI.hotswap(currentEditClass, source, reason);
         if (res.ok) {
             toast('Hot-swap successful: ' + currentEditClass, 'success');
             setEditorStatus('Hot-swap successful!');
@@ -288,8 +394,9 @@
 
     async function doRollback() {
         if (!currentEditClass) return;
+        const reason = (document.getElementById('hotswapReason').value || '').trim() || undefined;
         setEditorStatus('Rolling back ' + currentEditClass + '...');
-        const res = await JoltAPI.rollback(currentEditClass);
+        const res = await JoltAPI.rollback(currentEditClass, reason);
         if (res.ok) {
             toast('Rollback successful: ' + currentEditClass, 'success');
             setEditorStatus('Rollback successful!');
@@ -315,10 +422,38 @@
     // Flame Graph / Trace
     // ================================================================
     let flameChart = null;
+    let currentFlameView = 'auto';
+
+    // View toggle buttons
+    document.getElementById('flameViewGroup').addEventListener('click', (e) => {
+        const btn = e.target.closest('.btn-view');
+        if (!btn || btn.disabled) return;
+        document.querySelectorAll('#flameViewGroup .btn-view').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentFlameView = btn.dataset.view;
+        refreshFlameGraph();
+    });
 
     document.getElementById('startTraceBtn').addEventListener('click', startTrace);
     document.getElementById('stopTraceBtn').addEventListener('click', stopTrace);
     document.getElementById('refreshFlameBtn').addEventListener('click', refreshFlameGraph);
+    document.getElementById('flameSearchBtn').addEventListener('click', doFlameSearch);
+    document.getElementById('flameClearSearchBtn').addEventListener('click', clearFlameSearch);
+    document.getElementById('flameSearchInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doFlameSearch();
+    });
+
+    function doFlameSearch() {
+        if (!flameChart) { toast('Load a flame graph first', 'error'); return; }
+        const term = document.getElementById('flameSearchInput').value.trim();
+        if (!term) { clearFlameSearch(); return; }
+        flameChart.search(term);
+    }
+
+    function clearFlameSearch() {
+        document.getElementById('flameSearchInput').value = '';
+        if (flameChart) flameChart.clear();
+    }
 
     async function startTrace() {
         const type = document.getElementById('traceType').value;
@@ -385,7 +520,8 @@
             return;
         }
 
-        const res = await JoltAPI.traceFlameGraph();
+        const viewParam = currentFlameView === 'auto' ? undefined : currentFlameView;
+        const res = await JoltAPI.traceFlameGraph(viewParam);
         if (!res.ok || !res.data || (!res.data.children && !res.data.name)) {
             container.innerHTML = '<div class="placeholder-msg">No flame graph data available. Start a trace first.</div>';
             return;
@@ -408,16 +544,77 @@
             container.innerHTML = '<div class="placeholder-msg">Error rendering flame graph: ' + esc(e.message) + '</div>';
         }
 
-        // Also load records
-        const recRes = await JoltAPI.traceRecords(20);
+        // Also load records — render as collapsible call tree using depth field
+        const recRes = await JoltAPI.traceRecords(100);
         const recEl = document.getElementById('traceRecords');
         if (recRes.ok && recRes.data && recRes.data.records && recRes.data.records.length) {
-            recEl.innerHTML = '<table class="mapping-table"><thead><tr><th>Class</th><th>Method</th><th>Duration</th><th>Thread</th></tr></thead><tbody>' +
-                recRes.data.records.map(r => `<tr><td>${esc(r.className || '')}</td><td>${esc(r.methodName || '')}</td><td>${r.durationMs != null ? r.durationMs + 'ms' : (r.durationNanos != null ? (r.durationNanos/1000000).toFixed(2) + 'ms' : '-')}</td><td>${esc(r.threadName || '')}</td></tr>`).join('') +
-                '</tbody></table>';
+            recEl.innerHTML = '<div class="trace-tree-header">Call Tree <span style="font-size:11px;color:var(--text-muted);font-weight:400">(' + recRes.data.records.length + ' records)</span></div>' +
+                renderTraceTree(recRes.data.records);
         } else {
             recEl.innerHTML = '';
         }
+    }
+
+    function renderTraceTree(records) {
+        if (!records || !records.length) return '';
+
+        // Build parent-child relationships using depth field
+        function durationLabel(r) {
+            if (r.durationMs != null) return r.durationMs.toFixed(2) + 'ms';
+            if (r.durationNanos != null) return (r.durationNanos / 1000000).toFixed(2) + 'ms';
+            return '-';
+        }
+
+        function renderNode(r) {
+            const shortClass = (r.className || '').split('.').pop();
+            const method = r.methodName || '';
+            const dur = durationLabel(r);
+            const hasErr = r.exceptionType;
+            const durClass = r.durationNanos > 100_000_000 ? 'trace-dur slow' : 'trace-dur';
+            const sig = esc(shortClass + '.' + method + '(' + (r.parameterTypes || []).map(p => p.split('.').pop()).join(', ') + ')');
+            const fullClass = esc(r.className || '');
+            const thread = esc(r.threadName || '');
+            let detail = `<span class="trace-class" title="${fullClass}">${sig}</span>`;
+            if (hasErr) detail += ` <span class="trace-err" title="${esc(r.exceptionType)}">\u26A0</span>`;
+            detail += ` <span class="${durClass}">${esc(dur)}</span>`;
+            detail += ` <span class="trace-thread">[${thread}]</span>`;
+            return detail;
+        }
+
+        // Group records into trees based on sequential depth transitions
+        const roots = [];
+        const stack = [];  // stack of {record, children}
+
+        for (const r of records) {
+            const node = { r, children: [] };
+            const depth = r.depth || 0;
+
+            // Pop stack until stack length matches depth
+            while (stack.length > depth) stack.pop();
+
+            if (stack.length === 0) {
+                roots.push(node);
+            } else {
+                stack[stack.length - 1].children.push(node);
+            }
+            stack.push(node);
+        }
+
+        function renderSubtree(nodes) {
+            if (!nodes.length) return '';
+            let html = '<ul class="trace-tree-list">';
+            for (const node of nodes) {
+                if (node.children.length > 0) {
+                    html += `<li><details open><summary class="trace-node">${renderNode(node.r)}</summary>${renderSubtree(node.children)}</details></li>`;
+                } else {
+                    html += `<li><span class="trace-node trace-leaf">${renderNode(node.r)}</span></li>`;
+                }
+            }
+            html += '</ul>';
+            return html;
+        }
+
+        return '<div class="trace-tree">' + renderSubtree(roots) + '</div>';
     }
 
     // ================================================================
@@ -581,6 +778,8 @@
     // Audit Log
     // ================================================================
     document.getElementById('auditRefresh').addEventListener('click', loadAudit);
+    document.getElementById('auditExportJson').addEventListener('click', () => exportAudit('json'));
+    document.getElementById('auditExportCsv').addEventListener('click', () => exportAudit('csv'));
 
     async function loadAudit() {
         const res = await JoltAPI.hotswapHistory();
@@ -592,18 +791,59 @@
             el.innerHTML = '<div class="placeholder-msg">No hot-swap operations recorded yet</div>';
             return;
         }
-        el.innerHTML = records.map(r => `
+        el.innerHTML = records.map(r => {
+            const diffHtml = r.diff && r.diff.startsWith('@@') ? renderDiff(r.diff) : (r.diff ? `<div class="audit-diff-summary">${esc(r.diff)}</div>` : '');
+            return `
             <div class="audit-item">
                 <div class="audit-header">
                     <span class="audit-action ${(r.action||'').toLowerCase()}">${esc(r.action || 'UNKNOWN')}</span>
                     <span class="audit-status ${(r.status||'').toLowerCase()}">${esc(r.status || '')}</span>
+                    ${r.operator ? `<span class="audit-operator">by ${esc(r.operator)}</span>` : ''}
                 </div>
                 <div class="audit-class">${esc(r.className || '')}</div>
+                ${r.reason ? `<div class="audit-reason"><em>Reason:</em> ${esc(r.reason)}</div>` : ''}
+                ${diffHtml ? `<details class="audit-diff-details"><summary class="audit-diff-toggle">Show diff</summary>${diffHtml}</details>` : ''}
                 <div style="display:flex;justify-content:space-between;margin-top:4px">
                     <span class="audit-time">${r.timestamp ? new Date(r.timestamp).toLocaleString() : ''}</span>
                     <span style="font-size:12px;color:var(--text-muted)">${esc(r.message || '')}</span>
                 </div>
-            </div>`).join('');
+            </div>`;
+        }).join('');
+    }
+
+    function renderDiff(diffText) {
+        const lines = diffText.split('\n');
+        let html = '<div class="diff-view"><pre class="diff-pre">';
+        for (const line of lines) {
+            if (line.startsWith('+') && !line.startsWith('+++')) {
+                html += `<span class="diff-add">${esc(line)}</span>\n`;
+            } else if (line.startsWith('-') && !line.startsWith('---')) {
+                html += `<span class="diff-del">${esc(line)}</span>\n`;
+            } else if (line.startsWith('@@')) {
+                html += `<span class="diff-hunk">${esc(line)}</span>\n`;
+            } else {
+                html += `<span class="diff-ctx">${esc(line)}</span>\n`;
+            }
+        }
+        html += '</pre></div>';
+        return html;
+    }
+
+    async function exportAudit(format) {
+        const res = await JoltAPI.auditExport(format);
+        if (res.ok) {
+            const blob = new Blob([typeof res.data === 'string' ? res.data : JSON.stringify(res.data)],
+                { type: format === 'csv' ? 'text/csv' : 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'joltvm-audit.' + (format === 'csv' ? 'csv' : 'jsonl');
+            a.click();
+            URL.revokeObjectURL(url);
+            toast('Audit log exported', 'success');
+        } else {
+            toast('Export failed: ' + errMsg(res.data), 'error');
+        }
     }
 
     // ================================================================
@@ -650,6 +890,6 @@
     // ================================================================
     // Init
     // ================================================================
-    loadDashboard();
+    checkAuth();
     loadMonaco();
 })();

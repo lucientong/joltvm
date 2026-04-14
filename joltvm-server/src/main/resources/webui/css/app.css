@@ -312,6 +312,28 @@ select.search-input {
     box-shadow: 0 2px 12px var(--danger-glow);
 }
 
+/* --- Button group (view toggle) --- */
+.btn-group {
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    border: 1px solid var(--border);
+}
+.btn-group .btn-view {
+    border-radius: 0;
+    border: none;
+    border-right: 1px solid var(--border);
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+}
+.btn-group .btn-view:last-child { border-right: none; }
+.btn-group .btn-view.active {
+    background: var(--accent);
+    color: var(--bg-primary);
+    font-weight: 600;
+}
+.btn-group .btn-view:not(.active):hover { background: var(--bg-overlay); }
+
 /* --- Cards with hover lift --- */
 .card {
     background: var(--bg-surface);
@@ -587,10 +609,50 @@ select.search-input {
 
 .trace-records {
     margin-top: 12px;
-    max-height: 200px;
+    max-height: 260px;
     overflow-y: auto;
     flex-shrink: 0;
 }
+
+/* Trace call tree */
+.trace-tree-header {
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
+}
+.trace-tree { padding: 6px 0; }
+.trace-tree-list {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 0 20px;
+}
+.trace-tree-list > li { padding: 1px 0; }
+details > summary { list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::marker { display: none; }
+.trace-node {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.trace-node:hover { background: var(--bg-overlay); }
+.trace-leaf { cursor: default; }
+.trace-class { color: var(--text-primary); }
+.trace-dur { color: var(--accent); font-size: 11px; }
+.trace-dur.slow { color: var(--danger); }
+.trace-thread { color: var(--text-muted); font-size: 11px; }
+.trace-err { color: var(--warning); }
+details[open] > summary .trace-node { color: var(--accent); }
 
 /* --- Spring --- */
 .spring-content {
@@ -923,3 +985,162 @@ select.search-input {
         transition-duration: 0.01ms !important;
     }
 }
+
+/* ================================================================
+   Login Overlay
+   ================================================================ */
+.login-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(17, 17, 27, 0.92);
+    backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    animation: fadeIn 0.3s var(--ease-out-quart);
+}
+
+.login-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 40px 36px;
+    width: 360px;
+    max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.login-logo {
+    font-size: 28px;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 8px;
+    color: var(--accent);
+}
+
+.login-logo span {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-glow) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.login-card h3 {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 400;
+    margin-bottom: 24px;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.login-error {
+    color: var(--danger);
+    font-size: 13px;
+    text-align: center;
+    padding: 8px;
+    background: rgba(243, 139, 168, 0.1);
+    border-radius: 6px;
+    margin-top: 4px;
+}
+
+/* ================================================================
+   User Badge (top-bar)
+   ================================================================ */
+.user-badge {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    padding: 4px 10px;
+    border-radius: 12px;
+    margin-right: 8px;
+    transition: color 0.2s, background 0.2s;
+}
+
+.user-badge:hover {
+    color: var(--accent);
+    background: rgba(137, 180, 250, 0.12);
+}
+
+/* ================================================================
+   Audit Log — enhanced fields
+   ================================================================ */
+.audit-operator {
+    font-size: 12px;
+    color: var(--accent);
+    margin-left: 8px;
+}
+
+.audit-reason {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    padding-left: 4px;
+    font-style: italic;
+}
+
+.audit-reason em {
+    color: var(--text-secondary);
+    font-style: normal;
+    font-weight: 500;
+}
+
+.audit-diff {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-top: 4px;
+    white-space: pre-wrap;
+}
+
+/* Diff rendering */
+.audit-diff-details { margin-top: 6px; }
+.audit-diff-toggle {
+    font-size: 12px;
+    color: var(--accent);
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 0;
+    list-style: none;
+}
+.audit-diff-toggle::-webkit-details-marker { display: none; }
+.audit-diff-summary {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-top: 4px;
+}
+.diff-view {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin-top: 4px;
+    overflow: auto;
+    max-height: 320px;
+}
+.diff-pre {
+    margin: 0;
+    padding: 6px 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre;
+}
+.diff-add { color: #a6e3a1; display: block; background: rgba(166,227,161,0.08); }
+.diff-del { color: #f38ba8; display: block; background: rgba(243,139,168,0.08); }
+.diff-hunk { color: #89b4fa; display: block; font-weight: 600; }
+.diff-ctx { color: var(--text-muted); display: block; }

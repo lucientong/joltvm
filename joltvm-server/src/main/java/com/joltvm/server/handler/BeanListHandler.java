@@ -21,13 +21,11 @@ import com.joltvm.server.RouteHandler;
 import com.joltvm.server.spring.SpringContextService;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
-import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.QueryStringDecoder;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
 
 /**
  * Handler for {@code GET /api/spring/beans} — lists all Spring beans in the target JVM.
@@ -64,7 +62,6 @@ import java.util.logging.Logger;
  */
 public final class BeanListHandler implements RouteHandler {
 
-    private static final Logger LOG = Logger.getLogger(BeanListHandler.class.getName());
 
     private static final int DEFAULT_PAGE_SIZE = 100;
     private static final int MAX_PAGE_SIZE = 1000;

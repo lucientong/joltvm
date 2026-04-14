@@ -148,10 +148,10 @@ The embedded HTTP server module, based on Netty 4.x, that runs inside the target
 |-------|---------------|
 | `JoltVMServer` | Netty HTTP server lifecycle management (start/stop). Boss group (1 thread) + Worker group (2 threads). Default port 7758, configurable. Idempotent start/stop with `AtomicBoolean`. |
 | `HttpRouter` | Path pattern matching with `{paramName}` support via regex compilation. Routes matched in registration order, first match wins. |
-| `HttpDispatcherHandler` | Netty `SimpleChannelInboundHandler` that dispatches requests to `RouteHandler` via `HttpRouter`. Handles CORS preflight (OPTIONS), static file fallback, and error handling. |
+| `HttpDispatcherHandler` | Netty `SimpleChannelInboundHandler` that dispatches requests to `RouteHandler` via `HttpRouter`. Handles CORS preflight (OPTIONS), token-based authentication and RBAC enforcement, static file fallback, and error handling. |
 | `StaticFileHandler` | Serves embedded Web UI static files from classpath `webui/` directory. Resolves MIME types for 18+ file extensions, prevents path traversal attacks, and sets cache control headers. |
 | `HttpResponseHelper` | Utility class for building JSON, text, and error responses with proper Content-Type and CORS headers. |
-| `APIRoutes` | Registers all API endpoints on the router during initialization. |
+| `APIRoutes` | Registers all API endpoints on the router during initialization. Manages 21 routes including security/audit endpoints. |
 | `HealthHandler` | `GET /api/health` — Returns JVM status, PID, uptime, and memory info. |
 | `ClassListHandler` | `GET /api/classes` — Paginated listing of loaded classes with package/search filters. |
 | `ClassDetailHandler` | `GET /api/classes/{className}` — Detailed class info (fields, methods, modifiers). |
@@ -172,6 +172,14 @@ The embedded HTTP server module, based on Netty 4.x, that runs inside the target
 | `RequestMappingHandler` | `GET /api/spring/mappings` — URL → method request mappings with HTTP method and search filtering. |
 | `DependencyChainHandler` | `GET /api/spring/dependencies/{beanName}` — Recursive dependency injection chain for a specific bean. |
 | `DependencyGraphHandler` | `GET /api/spring/dependencies` — Full dependency graph across all stereotyped beans. |
+| `Role` | RBAC role enum with three hierarchical levels: Viewer (1) < Operator (2) < Admin (3). Provides `hasPermission()` for upward-compatible permission checks. |
+| `SecurityConfig` | Authentication configuration and user management. `ConcurrentHashMap`-based credential storage with default admin account. Runtime enable/disable toggle. |
+| `TokenService` | HMAC-SHA256 token generation and validation. `SecureRandom` 32-byte key, Base64 payload, configurable expiration (default 24h), in-memory active token tracking, constant-time signature comparison. |
+| `RoutePermissions` | API endpoint to minimum `Role` mapping. 19 permission rules with exact match, prefix match, and auth-exempt endpoints. |
+| `AuditLogService` | Audit log service with in-memory `CopyOnWriteArrayList` (max 1000 entries) and optional JSON Lines file persistence. Records hot-swap operations and security events. Exports as JSON Lines or CSV. |
+| `LoginHandler` | `POST /api/auth/login` — Authenticates username/password, returns HMAC token with role info. |
+| `AuthStatusHandler` | `GET /api/auth/status` — Returns current authentication state and user info if token is provided. |
+| `AuditExportHandler` | `GET /api/audit/export` — Exports audit logs in JSON Lines or CSV format. Requires ADMIN role. |
 
 #### REST API Endpoints
 
@@ -195,6 +203,9 @@ The embedded HTTP server module, based on Netty 4.x, that runs inside the target
 | GET | `/api/spring/mappings` | URL → method request mappings |
 | GET | `/api/spring/dependencies` | Full dependency graph (Controller→Service→Repository) |
 | GET | `/api/spring/dependencies/{beanName}` | Dependency chain for a specific bean |
+| POST | `/api/auth/login` | Authenticate and get token |
+| GET | `/api/auth/status` | Current authentication status |
+| GET | `/api/audit/export` | Export audit logs (JSON Lines or CSV) |
 
 **Design considerations**:
 - Netty is chosen for its minimal footprint and zero external dependencies
@@ -397,7 +408,7 @@ Source Code (via REST API)
 
 **Rollback mechanism**: Before each hot-swap, `BytecodeBackupService` saves the original bytecode in a `ConcurrentHashMap<String, byte[]>` using `putIfAbsent` (first backup is never overwritten). Rollback retrieves the backup and re-applies it via `redefineClasses()`.
 
-**Audit trail**: Every hot-swap and rollback operation is recorded as a `HotSwapRecord` with id, className, action (HOTSWAP/ROLLBACK), status (SUCCESS/FAILED), message, and timestamp. History is stored in a `CopyOnWriteArrayList` with a maximum of 200 entries.
+**Audit trail**: Every hot-swap and rollback operation is recorded as a `HotSwapRecord` with id, className, action (HOTSWAP/ROLLBACK), status (SUCCESS/FAILED), message, timestamp, operator (from Bearer token), reason (from request body), and diff (auto-generated bytecode summary). History is stored in a `CopyOnWriteArrayList` with a maximum of 200 entries.
 
 ### Class Hot-Swap & Rollback
 
@@ -639,31 +650,70 @@ JoltVM is designed to minimize impact on the target application:
 
 ## Security Model
 
-*(Phase 5+ — design only)*
+*(Phase 7 — Implemented)*
+
+JoltVM provides a complete embedded RBAC + Token authentication system:
 
 ```
-┌─────────────────────────────────┐
-│         Security Layer          │
-├─────────────────────────────────┤
-│ Authentication                  │
-│  ├── Token-based (built-in)     │
-│  └── SSO/LDAP (enterprise)     │
-├─────────────────────────────────┤
-│ Authorization (RBAC)            │
-│  ├── Viewer: read-only access  │
-│  ├── Operator: hot-fix + trace │
-│  └── Admin: full access        │
-├─────────────────────────────────┤
-│ Audit Trail                     │
-│  ├── Every hot-fix → diff log  │
-│  ├── Timestamp + User + Reason │
-│  └── Immutable + Exportable    │
-├─────────────────────────────────┤
-│ Approval Workflow (optional)    │
-│  └── Hot-fix requires approval │
-│      from admin before applying│
-└─────────────────────────────────┘
+HTTP Request → HttpDispatcherHandler (Auth Middleware)
+                 ├── RoutePermissions.getRequiredRole(method, path)
+                 │     ├── null → No auth needed (login, static files)
+                 │     └── Role → Requires authentication
+                 ├── Extract Bearer token from Authorization header
+                 ├── TokenService.validateToken(token)
+                 │     ├── null → 401 Unauthorized
+                 │     └── TokenInfo → Check role permission
+                 ├── role.hasPermission(required)?
+                 │     ├── false → 403 Forbidden
+                 │     └── true → Continue to route handler
+                 └── Route to Handler
+                       ├── LoginHandler (POST /api/auth/login)
+                       ├── AuthStatusHandler (GET /api/auth/status)
+                       ├── AuditExportHandler (GET /api/audit/export)
+                       └── ... other business handlers
 ```
+
+### Key Components
+
+| Component | Responsibility |
+|-----------|---------------|
+| `Role` | Three-tier RBAC: Viewer (read-only) < Operator (hot-fix + trace) < Admin (full access) |
+| `SecurityConfig` | User management, credential validation, runtime enable/disable |
+| `TokenService` | HMAC-SHA256 token generation/validation, 24h expiration, constant-time comparison |
+| `RoutePermissions` | API endpoint → minimum role mapping, auth-exempt endpoints |
+| `AuditLogService` | Immutable audit log with file persistence and JSON/CSV export |
+
+### Permission Matrix
+
+| Endpoint | Method | Required Role |
+|----------|--------|---------------|
+| `/api/auth/login` | POST | *(none — public)* |
+| `/api/auth/status` | GET | *(none — public)* |
+| Static files (`/`, `/css/*`, `/js/*`) | GET | *(none — public)* |
+| `/api/health` | GET | VIEWER |
+| `/api/classes`, `/api/classes/{name}` | GET | VIEWER |
+| `/api/hotswap/history` | GET | VIEWER |
+| `/api/trace/records`, `/api/trace/flamegraph`, `/api/trace/status` | GET | VIEWER |
+| `/api/spring/beans`, `/api/spring/mappings`, `/api/spring/dependencies` | GET | VIEWER |
+| `/api/compile` | POST | OPERATOR |
+| `/api/hotswap`, `/api/rollback` | POST | OPERATOR |
+| `/api/trace/start`, `/api/trace/stop` | POST | OPERATOR |
+| `/api/audit/export` | GET | ADMIN |
+
+### Token Format
+
+```
+base64url(username:role:expirationEpochSeconds).base64url(HMAC-SHA256-signature)
+```
+
+- **Secret key**: 32 bytes from `SecureRandom` (generated per JVM session)
+- **Expiration**: Configurable, default 24 hours
+- **Signature verification**: Constant-time comparison to prevent timing attacks
+- **Active token tracking**: In-memory `ConcurrentHashMap` for immediate invalidation
+
+### Security Toggle
+
+Security can be completely disabled via `SecurityConfig.setEnabled(false)`. When disabled, all requests are allowed without authentication — suitable for development environments.
 
 ---
 
@@ -708,16 +758,16 @@ joltvm/
 │           ├── InstrumentationHolderTest.java
 │           └── AttachHelperTest.java       # 15 tests (PID validation, etc.)
 │
-├── joltvm-server/                  # ── Embedded Web Server (Phase 2–6) ──
+├── joltvm-server/                  # ── Embedded Web Server (Phase 2–7) ──
 │   ├── build.gradle.kts
 │   └── src/
 │       ├── main/java/com/joltvm/server/
 │       │   ├── JoltVMServer.java           # Netty HTTP server lifecycle
 │       │   ├── HttpRouter.java             # Path pattern matching + params
-│       │   ├── HttpDispatcherHandler.java  # Request dispatch + CORS + static fallback
+│       │   ├── HttpDispatcherHandler.java  # Request dispatch + CORS + auth middleware + static fallback
 │       │   ├── HttpResponseHelper.java     # JSON/text response builder
 │       │   ├── RouteHandler.java           # Functional route handler interface
-│       │   ├── APIRoutes.java              # API route registration (18 routes)
+│       │   ├── APIRoutes.java              # API route registration (21 routes)
 │       │   ├── handler/
 │       │   │   ├── HealthHandler.java      # GET /api/health
 │       │   │   ├── ClassListHandler.java   # GET /api/classes
@@ -737,7 +787,10 @@ joltvm/
 │       │   │   ├── BeanDetailHandler.java  # GET /api/spring/beans/{beanName}
 │       │   │   ├── RequestMappingHandler.java # GET /api/spring/mappings
 │       │   │   ├── DependencyGraphHandler.java # GET /api/spring/dependencies
-│       │   │   └── DependencyChainHandler.java # GET /api/spring/dependencies/{beanName}
+│       │   │   ├── DependencyChainHandler.java # GET /api/spring/dependencies/{beanName}
+│       │   │   ├── LoginHandler.java       # POST /api/auth/login
+│       │   │   ├── AuthStatusHandler.java  # GET /api/auth/status
+│       │   │   └── AuditExportHandler.java # GET /api/audit/export
 │       │   ├── compile/
 │       │   │   ├── InMemoryCompiler.java   # javax.tools in-memory compilation
 │       │   │   ├── CompileResult.java      # Compilation result record
@@ -758,6 +811,13 @@ joltvm/
 │       │   │   └── TracingException.java   # Tracing error
 │       │   ├── spring/
 │       │   │   ├── SpringContextService.java # Spring context discovery + bean analysis
+│       │   │   └── package-info.java
+│       │   ├── security/
+│       │   │   ├── Role.java               # RBAC roles (Viewer/Operator/Admin)
+│       │   │   ├── SecurityConfig.java     # Auth configuration + user management
+│       │   │   ├── TokenService.java       # HMAC-SHA256 token generation/validation
+│       │   │   ├── RoutePermissions.java   # API endpoint → role mapping
+│       │   │   ├── AuditLogService.java    # Audit log persistence + export
 │       │   │   └── package-info.java
 │       │   └── package-info.java
 │       ├── main/resources/webui/            # ── Embedded Web UI Assets ──
@@ -842,7 +902,8 @@ joltvm/
 | **Phase 4** | Method tracing + flame graph data | Byte Buddy Advice, stack sampling | ✅ Complete |
 | **Phase 5** | Spring Boot awareness | Spring `ApplicationContext`, `RequestMappingHandlerMapping` | ✅ Complete |
 | **Phase 6** | Web UI | Vanilla JS, Monaco Editor (CDN), d3-flame-graph (CDN) | ✅ Complete |
+| **Phase 7** | Security & Audit (RBAC + token auth + audit log + export) | HMAC-SHA256, `ConcurrentHashMap`, JSON Lines | ✅ Complete |
 
 ---
 
-*Last updated: 2026-04-11*
+*Last updated: 2026-04-14*
