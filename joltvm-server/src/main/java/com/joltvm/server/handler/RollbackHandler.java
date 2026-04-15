@@ -47,9 +47,16 @@ public class RollbackHandler implements RouteHandler {
     private static final Logger LOG = Logger.getLogger(RollbackHandler.class.getName());
 
     private final HotSwapService hotSwapService;
+    private final com.joltvm.server.security.TokenService tokenService;
 
     public RollbackHandler(HotSwapService hotSwapService) {
+        this(hotSwapService, null);
+    }
+
+    public RollbackHandler(HotSwapService hotSwapService,
+                            com.joltvm.server.security.TokenService tokenService) {
         this.hotSwapService = hotSwapService;
+        this.tokenService = tokenService;
     }
 
     @Override
@@ -113,24 +120,20 @@ public class RollbackHandler implements RouteHandler {
     }
 
     /**
-     * Extracts the operator username from the Authorization Bearer token.
+     * Extracts the operator username from the Authorization Bearer token
+     * by delegating to {@link com.joltvm.server.security.TokenService}.
+     *
+     * <p>Validates the token (HMAC + expiration) before extracting the username.
+     * Returns {@code null} if no valid token is present or security is disabled.
      */
-    private static String extractOperator(FullHttpRequest request) {
+    private String extractOperator(FullHttpRequest request) {
+        if (tokenService == null) {
+            return null;
+        }
         String authHeader = request.headers().get("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return null;
         }
-        String token = authHeader.substring(7);
-        try {
-            String[] parts = token.split("\\.", 2);
-            if (parts.length < 1) return null;
-            String payload = new String(
-                    java.util.Base64.getUrlDecoder().decode(parts[0]),
-                    java.nio.charset.StandardCharsets.UTF_8);
-            String[] fields = payload.split(":", 3);
-            return fields.length > 0 ? fields[0] : null;
-        } catch (Exception e) {
-            return null;
-        }
+        return tokenService.extractUsername(authHeader.substring(7));
     }
 }

@@ -28,7 +28,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -56,7 +56,7 @@ import java.util.logging.Logger;
  *   <li>Record: log the rollback to history</li>
  * </ol>
  *
- * <p>Thread-safe: uses {@link CopyOnWriteArrayList} for history and per-class
+ * <p>Thread-safe: uses {@link LinkedBlockingDeque} for bounded history and per-class
  * {@link ReentrantLock} to serialize concurrent hot-swap / rollback on the same class.
  */
 public class HotSwapService {
@@ -65,7 +65,7 @@ public class HotSwapService {
     private static final int MAX_HISTORY = 200;
 
     private final BytecodeBackupService backupService;
-    private final List<HotSwapRecord> history = new CopyOnWriteArrayList<>();
+    private final LinkedBlockingDeque<HotSwapRecord> history = new LinkedBlockingDeque<>(MAX_HISTORY);
 
     /**
      * Per-class locks that serialize concurrent hotSwap / rollback on the same class name.
@@ -313,9 +313,9 @@ public class HotSwapService {
      * @return unmodifiable list of hot-swap records
      */
     public List<HotSwapRecord> getHistory() {
-        List<HotSwapRecord> reversed = new ArrayList<>(history);
-        Collections.reverse(reversed);
-        return Collections.unmodifiableList(reversed);
+        List<HotSwapRecord> snapshot = new ArrayList<>(history);
+        Collections.reverse(snapshot);
+        return Collections.unmodifiableList(snapshot);
     }
 
     /**
@@ -372,10 +372,9 @@ public class HotSwapService {
     }
 
     private void addHistory(HotSwapRecord record) {
-        history.add(record);
-        // Trim old entries if history exceeds max size
-        while (history.size() > MAX_HISTORY) {
-            history.remove(0);
+        // If deque is full, remove the oldest entry to make room
+        while (!history.offerLast(record)) {
+            history.pollFirst();
         }
     }
 }

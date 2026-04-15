@@ -25,6 +25,7 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -62,7 +63,7 @@ public final class TokenService {
     private final Map<String, Instant> revokedTokens = new ConcurrentHashMap<>();
 
     /** Cleanup counter — triggers revocation cleanup every 100 validation calls. */
-    private int validateCallCount = 0;
+    private final AtomicInteger validateCallCount = new AtomicInteger(0);
 
     /**
      * Creates a token service with a random secret key and default expiration.
@@ -127,7 +128,7 @@ public final class TokenService {
         if (token == null || token.isBlank()) return null;
 
         // Lazily clean up expired revocation entries
-        if (++validateCallCount % 100 == 0) {
+        if (validateCallCount.incrementAndGet() % 100 == 0) {
             cleanupExpiredRevocations();
         }
 
@@ -287,5 +288,20 @@ public final class TokenService {
      * @param expiration when the token expires
      */
     public record TokenInfo(String username, Role role, Instant expiration) {
+    }
+
+    /**
+     * Extracts the operator username from a Bearer token string.
+     *
+     * <p>Validates the token (HMAC + expiration) before extracting the username.
+     * Returns {@code null} if the token is missing, invalid, expired, or revoked.
+     *
+     * @param bearerToken the raw Bearer token (without the "Bearer " prefix)
+     * @return the username, or {@code null}
+     */
+    public String extractUsername(String bearerToken) {
+        if (bearerToken == null || bearerToken.isBlank()) return null;
+        TokenInfo info = validateToken(bearerToken);
+        return info != null ? info.username() : null;
     }
 }

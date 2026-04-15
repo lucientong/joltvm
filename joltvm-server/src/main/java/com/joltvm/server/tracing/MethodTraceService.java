@@ -198,7 +198,7 @@ public class MethodTraceService {
             throw new TracingException("Instrumentation not available. Agent may not be loaded.");
         }
 
-        if (tracing.get()) {
+        if (!tracing.compareAndSet(false, true)) {
             throw new TracingException("A trace is already active on: " + currentTraceTarget
                     + ". Stop the current trace first.");
         }
@@ -212,8 +212,8 @@ public class MethodTraceService {
 
         try {
             // Set up the active collector for the Advice callback
+            // tracing is already set to true by compareAndSet above
             activeCollector = collector;
-            tracing.set(true);
             tracedClasses.add(className);
 
             // Install Byte Buddy Advice

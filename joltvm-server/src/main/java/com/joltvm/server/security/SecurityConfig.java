@@ -17,13 +17,16 @@
 package com.joltvm.server.security;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.security.spec.InvalidKeySpecException;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
 
 /**
  * Security configuration for JoltVM.
@@ -32,7 +35,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Passwords are stored as salted SHA-256 hashes — never in plain text.
  * When security is disabled, all requests are allowed without authentication.
  *
- * <p>Password hash format: {@code hex(salt)$hex(SHA-256(salt || password))}
+ * <p>Password hash format (PBKDF2): {@code $pbkdf2-sha256$iterations$base64(salt)$base64(hash)}
+ * <p>Legacy format (SHA-256, read-only for migration): {@code hex(salt)$hex(SHA-256(salt || password))}
  */
 public final class SecurityConfig {
 
@@ -134,6 +138,14 @@ public final class SecurityConfig {
         if (username == null || password == null) return null;
         UserEntry entry = users.get(username);
         if (entry != null && verifyPassword(password, entry.passwordHash())) {
+            // Migrate legacy SHA-256 hash to PBKDF2 on successful login
+            if (isLegacyHash(entry.passwordHash())) {
+                String upgraded = encodePassword(password);
+                UserEntry migrated = new UserEntry(
+                        entry.username(), upgraded, entry.role(), entry.passwordChangeRequired());
+                users.put(username, migrated);
+                return migrated;
+            }
             return entry;
         }
         return null;
@@ -158,21 +170,39 @@ public final class SecurityConfig {
         return Collections.unmodifiableMap(users);
     }
 
-    // ── Password hashing utilities ────────────────────────────────────────────
+    // ── Password hashing utilities (PBKDF2) ────────────────────────────────────
+
+    /** PBKDF2 iteration count — OWASP 2024 recommendation for PBKDF2-SHA256. */
+    static final int PBKDF2_ITERATIONS = 310_000;
+
+    /** Derived key length in bits. */
+    private static final int KEY_LENGTH_BITS = 256;
+
+    /** Salt length in bytes. */
+    private static final int SALT_LENGTH_BYTES = 16;
+
+    /** Prefix identifying PBKDF2 hashes vs legacy SHA-256 hashes. */
+    private static final String PBKDF2_PREFIX = "$pbkdf2-sha256$";
 
     /**
-     * Encodes a plaintext password as {@code hex(salt)$hex(SHA-256(salt || password))}.
+     * Encodes a plaintext password as PBKDF2-SHA256 hash.
+     * Format: {@code $pbkdf2-sha256$iterations$base64(salt)$base64(hash)}
      *
      * @param plaintext the plaintext password
      * @return the encoded hash string
      */
     static String encodePassword(String plaintext) {
-        String salt = generateSalt();
-        return salt + "$" + hashPassword(plaintext, salt);
+        byte[] salt = new byte[SALT_LENGTH_BYTES];
+        new SecureRandom().nextBytes(salt);
+        byte[] hash = pbkdf2(plaintext, salt, PBKDF2_ITERATIONS);
+        return PBKDF2_PREFIX + PBKDF2_ITERATIONS + "$"
+                + Base64.getEncoder().encodeToString(salt) + "$"
+                + Base64.getEncoder().encodeToString(hash);
     }
 
     /**
      * Verifies a plaintext password against an encoded hash.
+     * Supports both PBKDF2 (new) and legacy SHA-256 formats.
      *
      * @param plaintext the plaintext password to verify
      * @param encoded   the stored encoded hash
@@ -180,21 +210,62 @@ public final class SecurityConfig {
      */
     static boolean verifyPassword(String plaintext, String encoded) {
         if (encoded == null) return false;
+        if (encoded.startsWith(PBKDF2_PREFIX)) {
+            return verifyPbkdf2(plaintext, encoded);
+        }
+        // Legacy SHA-256 format: hex(salt)$hex(hash)
+        return verifyLegacySha256(plaintext, encoded);
+    }
+
+    /**
+     * Returns whether the encoded hash uses the legacy SHA-256 format
+     * and should be re-hashed with PBKDF2 on next successful login.
+     */
+    static boolean isLegacyHash(String encoded) {
+        return encoded != null && !encoded.startsWith(PBKDF2_PREFIX);
+    }
+
+    private static boolean verifyPbkdf2(String plaintext, String encoded) {
+        // Format: $pbkdf2-sha256$iterations$base64(salt)$base64(hash)
+        String withoutPrefix = encoded.substring(PBKDF2_PREFIX.length());
+        String[] parts = withoutPrefix.split("\\$", 3);
+        if (parts.length != 3) return false;
+
+        try {
+            int iterations = Integer.parseInt(parts[0]);
+            byte[] salt = Base64.getDecoder().decode(parts[1]);
+            byte[] expectedHash = Base64.getDecoder().decode(parts[2]);
+            byte[] actualHash = pbkdf2(plaintext, salt, iterations);
+            return constantEquals(actualHash, expectedHash);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean verifyLegacySha256(String plaintext, String encoded) {
         String[] parts = encoded.split("\\$", 2);
         if (parts.length != 2) return false;
-        String expectedHash = hashPassword(plaintext, parts[0]);
+        String expectedHash = legacySha256Hash(plaintext, parts[0]);
         return constantEquals(expectedHash, parts[1]);
     }
 
-    private static String generateSalt() {
-        byte[] salt = new byte[16];
-        new SecureRandom().nextBytes(salt);
-        return bytesToHex(salt);
+    private static byte[] pbkdf2(String password, byte[] salt, int iterations) {
+        try {
+            PBEKeySpec spec = new PBEKeySpec(
+                    password.toCharArray(), salt, iterations, KEY_LENGTH_BITS);
+            SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+            return factory.generateSecret(spec).getEncoded();
+        } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
+            throw new RuntimeException("PBKDF2WithHmacSHA256 not available", e);
+        }
     }
 
-    private static String hashPassword(String password, String salt) {
+    /**
+     * Legacy SHA-256 hash for backward compatibility during migration.
+     */
+    private static String legacySha256Hash(String password, String salt) {
         try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
             md.update(salt.getBytes(StandardCharsets.UTF_8));
             byte[] hash = md.digest(password.getBytes(StandardCharsets.UTF_8));
             return bytesToHex(hash);
@@ -203,6 +274,21 @@ public final class SecurityConfig {
         }
     }
 
+    /**
+     * Constant-time comparison for byte arrays to prevent timing attacks.
+     */
+    private static boolean constantEquals(byte[] a, byte[] b) {
+        if (a.length != b.length) return false;
+        int result = 0;
+        for (int i = 0; i < a.length; i++) {
+            result |= a[i] ^ b[i];
+        }
+        return result == 0;
+    }
+
+    /**
+     * Constant-time comparison for strings to prevent timing attacks.
+     */
     private static boolean constantEquals(String a, String b) {
         if (a.length() != b.length()) return false;
         int result = 0;
