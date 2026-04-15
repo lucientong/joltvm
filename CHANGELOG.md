@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-15
+
+### Added
+- **JVM Info Service** (`JvmInfoService`) — Centralized service for GC statistics, system properties, environment variables, and classpath inspection. Sensitive keys (password, secret, token, api_key, etc.) are automatically redacted via regex pattern matching.
+- **REST API: `GET /api/jvm/gc`** — GC statistics per collector (name, count, total time, memory pools) with overall GC overhead percentage.
+- **REST API: `GET /api/jvm/sysprops`** — Sorted system properties with sensitive value redaction. Returns key-value pairs with count.
+- **REST API: `GET /api/jvm/sysenv`** — Sorted environment variables with sensitive value redaction.
+- **REST API: `GET /api/jvm/classpath`** — Runtime classpath entries with type (file/directory), existence check, and file size. Includes JPMS module path when available.
+- **Web UI: Dashboard Enhancement** — Four collapsible `<details>` sections added to Dashboard: GC Statistics (table with collectors), System Properties (searchable/filterable table), Environment Variables (searchable/filterable table), Classpath (entries with type and size). Data loaded lazily on expand.
+- **`dashboard.js`** — Extracted dashboard enhancement logic into dedicated JS module. Includes search filtering, sensitive value highlighting, and human-friendly byte/time formatting.
+- **20 new tests** — JvmInfoService (15: GC stats, sysprops, sysenv, classpath, sensitive key detection), GcStatsHandler (1), SysPropsHandler (1), SysEnvHandler (1), ClasspathHandler (1), RoutePermissions JVM endpoints (1)
+- **Docker CI/CD merged into release.yml** — Consolidated `docker-publish.yml` into `release.yml` as a second job (`docker`, `needs: publish`). Single tag push now triggers Maven Central → GitHub Release → Docker Hub in one atomic pipeline.
+
+### Changed
+- `APIRoutes` now registers 30 routes (was 26): added 4 JVM info endpoints
+- `RoutePermissions` updated with JVM info endpoint permissions (VIEWER role)
+- `release.yml` now includes Docker build & push as Job 2 (requires `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` secrets)
+- Removed standalone `docker-publish.yml` workflow
+- Updated project version to 0.11.0
+
 ## [0.10.0] - 2026-04-15
 
 ### Added

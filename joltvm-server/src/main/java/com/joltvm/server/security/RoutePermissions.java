@@ -85,7 +85,13 @@ public final class RoutePermissions {
             Map.entry("GET:/api/threads", Role.VIEWER),
             Map.entry("GET:/api/threads/top", Role.VIEWER),
             Map.entry("GET:/api/threads/deadlocks", Role.VIEWER),
-            Map.entry("GET:/api/threads/dump", Role.VIEWER)
+            Map.entry("GET:/api/threads/dump", Role.VIEWER),
+
+            // JVM info endpoints — VIEWER (read-only)
+            Map.entry("GET:/api/jvm/gc", Role.VIEWER),
+            Map.entry("GET:/api/jvm/sysprops", Role.VIEWER),
+            Map.entry("GET:/api/jvm/sysenv", Role.VIEWER),
+            Map.entry("GET:/api/jvm/classpath", Role.VIEWER)
     );
 
     /**
