@@ -113,6 +113,21 @@ const JoltAPI = (() => {
         jvmGc: () => request('GET', '/api/jvm/gc'),
         jvmSysProps: () => request('GET', '/api/jvm/sysprops'),
         jvmSysEnv: () => request('GET', '/api/jvm/sysenv'),
-        jvmClasspath: () => request('GET', '/api/jvm/classpath')
+        jvmClasspath: () => request('GET', '/api/jvm/classpath'),
+
+        // ClassLoaders
+        classloaderTree: () => request('GET', '/api/classloaders'),
+        classloaderClasses: (id, page, size, search) => {
+            const params = new URLSearchParams();
+            if (page != null) params.set('page', page);
+            if (size != null) params.set('size', size);
+            if (search) params.set('search', search);
+            return request('GET', '/api/classloaders/' + encodeURIComponent(id) + '/classes?' + params.toString());
+        },
+        classloaderConflicts: () => request('GET', '/api/classloaders/conflicts'),
+
+        // Loggers
+        loggerList: () => request('GET', '/api/loggers'),
+        loggerUpdate: (name, level) => request('PUT', '/api/loggers/' + encodeURIComponent(name), { level })
     };
 })();

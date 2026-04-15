@@ -91,7 +91,15 @@ public final class RoutePermissions {
             Map.entry("GET:/api/jvm/gc", Role.VIEWER),
             Map.entry("GET:/api/jvm/sysprops", Role.VIEWER),
             Map.entry("GET:/api/jvm/sysenv", Role.VIEWER),
-            Map.entry("GET:/api/jvm/classpath", Role.VIEWER)
+            Map.entry("GET:/api/jvm/classpath", Role.VIEWER),
+
+            // ClassLoader analysis endpoints — VIEWER (read-only)
+            Map.entry("GET:/api/classloaders", Role.VIEWER),
+            Map.entry("GET:/api/classloaders/conflicts", Role.VIEWER),
+
+            // Logger endpoints — GET is VIEWER, PUT is OPERATOR
+            Map.entry("GET:/api/loggers", Role.VIEWER),
+            Map.entry("PUT:/api/loggers", Role.OPERATOR)
     );
 
     /**

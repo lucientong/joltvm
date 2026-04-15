@@ -148,6 +148,8 @@
         if (view === 'trace') loadTraceStatus();
         if (view === 'spring') loadSpring();
         if (view === 'audit') loadAudit();
+        if (view === 'classloaders') ClassLoadersPanel.loadTree();
+        if (view === 'loggers') LoggersPanel.loadLoggers();
     }
 
     // ================================================================

@@ -45,7 +45,7 @@ class ThreadDiagnosticsServiceTest {
     @Test
     void getAllThreads_containsMainThread() {
         List<Map<String, Object>> threads = service.getAllThreads(null);
-        boolean hasMain = threads.stream()
+        threads.stream()
                 .anyMatch(t -> "main".equals(t.get("name")));
         // main thread may not always be present in test context, but there should be threads
         assertTrue(threads.size() > 0);
