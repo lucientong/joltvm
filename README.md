@@ -17,7 +17,7 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ## ✨ Features
 
-> JoltVM is under active development. Phase 1 (Agent skeleton + Attach API), Phase 2 (Netty Web Server + REST APIs), Phase 3 (Hot-Swap + Rollback), Phase 4 (Method Tracing + Flame Graph), Phase 5 (Spring Boot Awareness), Phase 6 (Web UI), Phase 7 (Security & Audit), and Phase 8 (Security Hardening) are complete. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 through Phase 9 are complete. See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, interactive flame graphs (d3-flame-graph), class/method tree navigation, Spring Boot bean browser, and audit dashboard. Edit code and apply hot-fixes visually — all served from the embedded Netty server at `http://localhost:7758`.
@@ -33,6 +33,9 @@ List all Spring beans with filtering and pagination. Parse `@RequestMapping` end
 
 ### 🔒 Security & Audit
 HMAC-SHA256 token-based authentication with three-tier RBAC (Viewer / Operator / Admin). Authentication middleware enforces permissions on every API request. Every hot-fix generates an audit entry with timestamp, operator, reason, and diff. Immutable audit logs with JSON Lines and CSV export. Passwords secured with PBKDF2-SHA256 (310,000 iterations). Security can be disabled for development use.
+
+### 🧵 Thread Diagnostics
+List all JVM threads with state, CPU time, and lock info. Identify top-N CPU-consuming threads via two-sample delta analysis. Detect deadlocks (object monitor and ownable synchronizer). Export jstack-compatible thread dumps. All accessible from the browser-based Threads tab with color-coded state badges and click-to-view stack traces.
 
 ---
 
@@ -140,6 +143,45 @@ implementation("io.github.lucientong:joltvm-agent:0.7.0")
 
 ---
 
+## 🐳 Docker
+
+### Pull from Docker Hub
+
+```bash
+docker pull lucientong/joltvm
+```
+
+### List JVM Processes
+
+```bash
+# Within a container or with PID namespace sharing
+docker run --pid=host lucientong/joltvm list
+```
+
+### Attach to a Running JVM
+
+```bash
+# Share PID namespace and use host networking
+docker run --pid=host --network=host lucientong/joltvm attach <pid>
+```
+
+### Copy Agent JAR to Shared Volume (Sidecar Pattern)
+
+```bash
+docker run -v agent-vol:/export lucientong/joltvm \
+  cp /opt/joltvm/joltvm-agent.jar /export/
+```
+
+### Use as -javaagent
+
+```dockerfile
+FROM eclipse-temurin:17-jdk
+COPY --from=lucientong/joltvm /opt/joltvm/joltvm-agent.jar /opt/joltvm/
+CMD ["java", "-javaagent:/opt/joltvm/joltvm-agent.jar", "-jar", "your-app.jar"]
+```
+
+---
+
 ## 🗺️ Roadmap
 
 - [x] **Phase 1**: Agent skeleton (premain/agentmain) + Attach API + CLI
@@ -150,7 +192,7 @@ implementation("io.github.lucientong:joltvm-agent:0.7.0")
 - [x] **Phase 6**: Web UI (Monaco Editor + flame graph + dashboard + Spring panel)
 - [x] **Phase 7**: Security & Audit (RBAC + token auth + audit log + export)
 - [x] **Phase 8**: Security hardening (PBKDF2 password hashing, bug fixes, thread safety)
-- [ ] **Phase 9**: Thread diagnostics (thread list, CPU top-N, deadlock detection)
+- [x] **Phase 9**: Thread diagnostics (thread list, CPU top-N, deadlock detection)
 - [ ] **Phase 10**: JVM dashboard enhancement (GC stats, system properties, classpath)
 - [ ] **Phase 11**: ClassLoader analysis + Logger dynamic level adjustment
 - [ ] **Phase 12**: OGNL expression engine (runtime object inspection)

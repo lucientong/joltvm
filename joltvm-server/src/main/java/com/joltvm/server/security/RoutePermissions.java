@@ -79,7 +79,13 @@ public final class RoutePermissions {
             Map.entry("GET:/api/trace/status", Role.VIEWER),
             Map.entry("GET:/api/spring/beans", Role.VIEWER),
             Map.entry("GET:/api/spring/mappings", Role.VIEWER),
-            Map.entry("GET:/api/spring/dependencies", Role.VIEWER)
+            Map.entry("GET:/api/spring/dependencies", Role.VIEWER),
+
+            // Thread diagnostics endpoints — VIEWER (read-only)
+            Map.entry("GET:/api/threads", Role.VIEWER),
+            Map.entry("GET:/api/threads/top", Role.VIEWER),
+            Map.entry("GET:/api/threads/deadlocks", Role.VIEWER),
+            Map.entry("GET:/api/threads/dump", Role.VIEWER)
     );
 
     /**

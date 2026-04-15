@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-04-15
+
+### Added
+- **Thread Diagnostics** (`ThreadDiagnosticsService`) — Full thread inspection via `ThreadMXBean`: list all threads with state/lock/metrics, get detailed thread info with full stack traces and locked monitors/synchronizers.
+- **CPU Top-N Analysis** — Two-sample CPU time delta measurement to identify the most CPU-consuming threads. Results cached for 5 seconds to avoid excessive sampling. Configurable sample count and interval.
+- **Deadlock Detection** — Detects both object monitor deadlocks and ownable synchronizer deadlocks via `findDeadlockedThreads()` and `findMonitorDeadlockedThreads()`.
+- **Thread Dump Export** — Generates jstack-compatible plain-text thread dump including lock info, monitors, and synchronizers. Returned as `text/plain` with download header.
+- **REST API: `GET /api/threads`** — List all live threads with optional `?state=BLOCKED` filter. Returns thread summaries with CPU time, block/wait counts.
+- **REST API: `GET /api/threads/top`** — Top-N CPU threads. Query params: `?n=10&interval=1000` (sampling interval in ms).
+- **REST API: `GET /api/threads/{id}`** — Detailed thread info with full stack trace, locked monitors at each frame, and locked synchronizers.
+- **REST API: `GET /api/threads/deadlocks`** — Deadlock detection results with involved threads and lock cycle info.
+- **REST API: `GET /api/threads/dump`** — Plain-text thread dump download (`Content-Type: text/plain`).
+- **Web UI: Threads Tab** — New "Threads" tab with thread list table (state badges, CPU time), click-to-view stack trace panel, Top CPU button, deadlock check, and thread dump export.
+- **Docker Support** — Multi-stage Dockerfile with `eclipse-temurin:17-jdk`, multi-platform builds (amd64/arm64), convenience wrapper script. Docker Hub CI/CD via `docker-publish.yml` workflow.
+- **27 new tests** — ThreadDiagnosticsService (14), ThreadListHandler (3), ThreadDetailHandler (4), ThreadDeadlockHandler (1), ThreadDumpHandler (3), ThreadTopHandler (3)
+
+### Changed
+- `APIRoutes` now registers 26 routes (was 21): added 5 thread diagnostics endpoints
+- `RoutePermissions` updated with thread endpoint permissions (VIEWER role)
+- Updated project version to 0.10.0
+
 ## [0.9.0] - 2026-04-15
 
 ### Security
