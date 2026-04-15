@@ -65,16 +65,23 @@ public class HotSwapHandler implements RouteHandler {
 
     private final InMemoryCompiler compiler;
     private final HotSwapService hotSwapService;
+    private final com.joltvm.server.security.TokenService tokenService;
 
     public HotSwapHandler(HotSwapService hotSwapService) {
-        this.compiler = new InMemoryCompiler();
-        this.hotSwapService = hotSwapService;
+        this(new InMemoryCompiler(), hotSwapService, null);
+    }
+
+    public HotSwapHandler(HotSwapService hotSwapService,
+                           com.joltvm.server.security.TokenService tokenService) {
+        this(new InMemoryCompiler(), hotSwapService, tokenService);
     }
 
     // Visible for testing
-    HotSwapHandler(InMemoryCompiler compiler, HotSwapService hotSwapService) {
+    HotSwapHandler(InMemoryCompiler compiler, HotSwapService hotSwapService,
+                   com.joltvm.server.security.TokenService tokenService) {
         this.compiler = compiler;
         this.hotSwapService = hotSwapService;
+        this.tokenService = tokenService;
     }
 
     @Override
@@ -210,28 +217,20 @@ public class HotSwapHandler implements RouteHandler {
     }
 
     /**
-     * Extracts the operator username from the Authorization Bearer token.
+     * Extracts the operator username from the Authorization Bearer token
+     * by delegating to {@link com.joltvm.server.security.TokenService}.
      *
-     * <p>Decodes the token payload (base64) to extract the username field.
-     * Returns {@code null} if no valid token is present.
+     * <p>Validates the token (HMAC + expiration) before extracting the username.
+     * Returns {@code null} if no valid token is present or security is disabled.
      */
-    private static String extractOperator(FullHttpRequest request) {
+    private String extractOperator(FullHttpRequest request) {
+        if (tokenService == null) {
+            return null;
+        }
         String authHeader = request.headers().get("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             return null;
         }
-        String token = authHeader.substring(7);
-        try {
-            String[] parts = token.split("\\.", 2);
-            if (parts.length < 1) return null;
-            String payload = new String(
-                    java.util.Base64.getUrlDecoder().decode(parts[0]),
-                    java.nio.charset.StandardCharsets.UTF_8);
-            // payload format: username:role:expiration
-            String[] fields = payload.split(":", 3);
-            return fields.length > 0 ? fields[0] : null;
-        } catch (Exception e) {
-            return null;
-        }
+        return tokenService.extractUsername(authHeader.substring(7));
     }
 }

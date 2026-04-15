@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-04-15
+
+### Security
+- **P0.1 PBKDF2 password hashing** — Replaced single-pass SHA-256 with `PBKDF2WithHmacSHA256` (310,000 iterations, 256-bit key, 16-byte salt) in `SecurityConfig`. New self-describing hash format: `$pbkdf2-sha256$iterations$base64(salt)$base64(hash)`. Transparent migration: legacy SHA-256 hashes are auto-upgraded to PBKDF2 on next successful login.
+- **P0.2 Token validation in hot-swap operators** — `HotSwapHandler` and `RollbackHandler` now delegate operator extraction to `TokenService.extractUsername()` with full HMAC verification and expiration checks. Previously, `extractOperator()` decoded the token payload without any signature validation, allowing forged operator names in audit logs. Both handlers now accept `TokenService` via constructor injection.
+
+### Robustness
+- **P1.1 Atomic validate counter** — `TokenService.validateCallCount` changed from `int` to `AtomicInteger`. The previous non-atomic `++` could lose increments under concurrent request load, causing revocation cleanup to fire unpredictably.
+- **P1.2 Bounded history deque** — `HotSwapService` history replaced `CopyOnWriteArrayList` with `LinkedBlockingDeque` (capacity 200). The previous `remove(0)` in a while-loop triggered a full array copy per removal — O(n) per eviction. The deque provides O(1) bounded insertion with `pollFirst()` / `offerLast()`.
+- **P1.3 Trace start race fix** — `MethodTraceService.startTrace()` now uses `tracing.compareAndSet(false, true)` instead of separate `get()` + `set()` calls. This eliminates a race window where two concurrent `startTrace()` calls could both succeed, corrupting the global `activeCollector`.
+- **P1.4 Atomic service publication** — `APIRoutes` volatile fields `traceServiceInstance` and `auditLogServiceInstance` consolidated into an immutable `ServiceHolder` record with a single volatile write. Prevents handlers from seeing inconsistent service state during registration.
+
+### Changed
+- `HotSwapHandler` and `RollbackHandler` constructors now accept optional `TokenService` parameter (backward compatible)
+- `TokenService` exposes `extractUsername(String bearerToken)` convenience method
+- Updated project version to 0.9.0
+
 ## [0.8.0] - 2026-04-14
 
 ### Security

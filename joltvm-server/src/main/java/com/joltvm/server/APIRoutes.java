@@ -69,8 +69,14 @@ public final class APIRoutes {
     /** Total number of registered API endpoints. */
     static final int ROUTE_COUNT = 21;
 
-    private static volatile AuditLogService auditLogServiceInstance;
-    private static volatile MethodTraceService traceServiceInstance;
+    /**
+     * Immutable holder for shared service instances, ensuring atomic publication
+     * of all service references via a single volatile write.
+     */
+    private record ServiceHolder(MethodTraceService traceService, AuditLogService auditLogService) {
+    }
+
+    private static volatile ServiceHolder services;
 
     private APIRoutes() {
         // Utility class — no instantiation
@@ -85,7 +91,8 @@ public final class APIRoutes {
      * @return the trace service, or {@code null}
      */
     public static MethodTraceService getTraceService() {
-        return traceServiceInstance;
+        ServiceHolder holder = services;
+        return holder != null ? holder.traceService() : null;
     }
 
     /**
@@ -97,7 +104,8 @@ public final class APIRoutes {
      * @return the audit log service, or {@code null}
      */
     public static AuditLogService getAuditLogService() {
-        return auditLogServiceInstance;
+        ServiceHolder holder = services;
+        return holder != null ? holder.auditLogService() : null;
     }
 
     /**
@@ -154,14 +162,15 @@ public final class APIRoutes {
         // Shared service singletons
         HotSwapService hotSwapService = new HotSwapService();
         MethodTraceService traceService = new MethodTraceService();
-        traceServiceInstance = traceService;
         SpringContextService springService = new SpringContextService();
 
         String auditFilePath = agentArgs.get("auditFile");
         AuditLogService auditLogService = auditFilePath != null
                 ? new AuditLogService(Paths.get(auditFilePath))
                 : AuditLogService.createWithDefaultPath();
-        auditLogServiceInstance = auditLogService;
+
+        // Atomic publication of all service references via immutable holder
+        services = new ServiceHolder(traceService, auditLogService);
 
         router.addRoute(HttpMethod.GET, "/api/health", new HealthHandler());
 
@@ -170,8 +179,8 @@ public final class APIRoutes {
         router.addRoute(HttpMethod.GET, "/api/classes/{className}/source", new ClassSourceHandler());
 
         router.addRoute(HttpMethod.POST, "/api/compile", new CompileHandler());
-        router.addRoute(HttpMethod.POST, "/api/hotswap", new HotSwapHandler(hotSwapService));
-        router.addRoute(HttpMethod.POST, "/api/rollback", new RollbackHandler(hotSwapService));
+        router.addRoute(HttpMethod.POST, "/api/hotswap", new HotSwapHandler(hotSwapService, tokenService));
+        router.addRoute(HttpMethod.POST, "/api/rollback", new RollbackHandler(hotSwapService, tokenService));
         router.addRoute(HttpMethod.GET, "/api/hotswap/history", new HotSwapHistoryHandler(hotSwapService));
 
         router.addRoute(HttpMethod.POST, "/api/trace/start", new TraceHandler(traceService));

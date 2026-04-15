@@ -17,7 +17,7 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ## ✨ Features
 
-> JoltVM is under active development. Phase 1 (Agent skeleton + Attach API), Phase 2 (Netty Web Server + REST APIs), Phase 3 (Hot-Swap + Rollback), Phase 4 (Method Tracing + Flame Graph), Phase 5 (Spring Boot Awareness), Phase 6 (Web UI), and Phase 7 (Security & Audit) are complete. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 (Agent skeleton + Attach API), Phase 2 (Netty Web Server + REST APIs), Phase 3 (Hot-Swap + Rollback), Phase 4 (Method Tracing + Flame Graph), Phase 5 (Spring Boot Awareness), Phase 6 (Web UI), Phase 7 (Security & Audit), and Phase 8 (Security Hardening) are complete. See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, interactive flame graphs (d3-flame-graph), class/method tree navigation, Spring Boot bean browser, and audit dashboard. Edit code and apply hot-fixes visually — all served from the embedded Netty server at `http://localhost:7758`.
@@ -32,7 +32,7 @@ Zoomable, searchable flame graphs in the browser (d3-flame-graph). Toggle betwee
 List all Spring beans with filtering and pagination. Parse `@RequestMapping` endpoints with URL → method mappings. Analyze `@Controller → @Service → @Repository` dependency injection chains with circular dependency detection. Zero compile-time Spring dependencies — works via reflection with Spring Boot 2.x/3.x.
 
 ### 🔒 Security & Audit
-HMAC-SHA256 token-based authentication with three-tier RBAC (Viewer / Operator / Admin). Authentication middleware enforces permissions on every API request. Every hot-fix generates an audit entry with timestamp, operator, reason, and diff. Immutable audit logs with JSON Lines and CSV export. Security can be disabled for development use.
+HMAC-SHA256 token-based authentication with three-tier RBAC (Viewer / Operator / Admin). Authentication middleware enforces permissions on every API request. Every hot-fix generates an audit entry with timestamp, operator, reason, and diff. Immutable audit logs with JSON Lines and CSV export. Passwords secured with PBKDF2-SHA256 (310,000 iterations). Security can be disabled for development use.
 
 ---
 
@@ -149,6 +149,16 @@ implementation("io.github.lucientong:joltvm-agent:0.7.0")
 - [x] **Phase 5**: Spring Boot awareness (Bean list, URL mapping, dependency chains)
 - [x] **Phase 6**: Web UI (Monaco Editor + flame graph + dashboard + Spring panel)
 - [x] **Phase 7**: Security & Audit (RBAC + token auth + audit log + export)
+- [x] **Phase 8**: Security hardening (PBKDF2 password hashing, bug fixes, thread safety)
+- [ ] **Phase 9**: Thread diagnostics (thread list, CPU top-N, deadlock detection)
+- [ ] **Phase 10**: JVM dashboard enhancement (GC stats, system properties, classpath)
+- [ ] **Phase 11**: ClassLoader analysis + Logger dynamic level adjustment
+- [ ] **Phase 12**: OGNL expression engine (runtime object inspection)
+- [ ] **Phase 13**: Watch command (conditional method observation with OGNL filters)
+- [ ] **Phase 14**: async-profiler integration (CPU/Alloc/Lock profiling)
+- [ ] **Phase 15**: WebSocket real-time push
+- [ ] **Phase 16**: Plugin/SPI extension mechanism
+- [ ] **Phase 17**: Tunnel server for remote diagnostics → v1.0.0 GA
 
 ---
 
