@@ -18,7 +18,7 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ## ✨ Features
 
-> JoltVM is under active development. Phase 1 through Phase 10 are complete. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 through Phase 11 are complete. See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, interactive flame graphs (d3-flame-graph), class/method tree navigation, Spring Boot bean browser, and audit dashboard. Edit code and apply hot-fixes visually — all served from the embedded Netty server at `http://localhost:7758`.
@@ -31,6 +31,12 @@ Zoomable, searchable flame graphs in the browser (d3-flame-graph). Toggle betwee
 
 ### 🌱 Spring Boot Awareness
 List all Spring beans with filtering and pagination. Parse `@RequestMapping` endpoints with URL → method mappings. Analyze `@Controller → @Service → @Repository` dependency injection chains with circular dependency detection. Zero compile-time Spring dependencies — works via reflection with Spring Boot 2.x/3.x.
+
+### 🔍 ClassLoader Analysis
+Visualize the ClassLoader hierarchy tree, browse classes by loader, and detect classpath conflicts (same class loaded by multiple ClassLoaders). Uses `Instrumentation.getAllLoadedClasses()` for comprehensive analysis.
+
+### 📝 Dynamic Logger Level
+Auto-detects logging framework (Logback, Log4j2, JUL) via reflection with zero compile-time dependencies. List all loggers, view effective levels, and change log levels dynamically at runtime — all from the browser.
 
 ### 🔒 Security & Audit
 HMAC-SHA256 token-based authentication with three-tier RBAC (Viewer / Operator / Admin). Authentication middleware enforces permissions on every API request. Every hot-fix generates an audit entry with timestamp, operator, reason, and diff. Immutable audit logs with JSON Lines and CSV export. Passwords secured with PBKDF2-SHA256 (310,000 iterations). Security can be disabled for development use.
@@ -195,7 +201,7 @@ CMD ["java", "-javaagent:/opt/joltvm/joltvm-agent.jar", "-jar", "your-app.jar"]
 - [x] **Phase 8**: Security hardening (PBKDF2 password hashing, bug fixes, thread safety)
 - [x] **Phase 9**: Thread diagnostics (thread list, CPU top-N, deadlock detection)
 - [x] **Phase 10**: JVM dashboard enhancement (GC stats, system properties, classpath)
-- [ ] **Phase 11**: ClassLoader analysis + Logger dynamic level adjustment
+- [x] **Phase 11**: ClassLoader analysis + Logger dynamic level adjustment
 - [ ] **Phase 12**: OGNL expression engine (runtime object inspection)
 - [ ] **Phase 13**: Watch command (conditional method observation with OGNL filters)
 - [ ] **Phase 14**: async-profiler integration (CPU/Alloc/Lock profiling)

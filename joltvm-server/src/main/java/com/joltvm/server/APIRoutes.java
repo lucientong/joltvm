@@ -21,6 +21,9 @@ import com.joltvm.server.handler.AuthStatusHandler;
 import com.joltvm.server.handler.BeanDetailHandler;
 import com.joltvm.server.handler.BeanListHandler;
 import com.joltvm.server.handler.ClassDetailHandler;
+import com.joltvm.server.handler.ClassLoaderClassesHandler;
+import com.joltvm.server.handler.ClassLoaderConflictsHandler;
+import com.joltvm.server.handler.ClassLoaderTreeHandler;
 import com.joltvm.server.handler.ClassListHandler;
 import com.joltvm.server.handler.ClassSourceHandler;
 import com.joltvm.server.handler.ClasspathHandler;
@@ -32,6 +35,8 @@ import com.joltvm.server.handler.HealthHandler;
 import com.joltvm.server.handler.HotSwapHandler;
 import com.joltvm.server.handler.HotSwapHistoryHandler;
 import com.joltvm.server.handler.LoginHandler;
+import com.joltvm.server.handler.LoggerListHandler;
+import com.joltvm.server.handler.LoggerUpdateHandler;
 import com.joltvm.server.handler.RequestMappingHandler;
 import com.joltvm.server.handler.RollbackHandler;
 import com.joltvm.server.handler.SysEnvHandler;
@@ -45,8 +50,10 @@ import com.joltvm.server.handler.TraceFlameGraphHandler;
 import com.joltvm.server.handler.TraceHandler;
 import com.joltvm.server.handler.TraceListHandler;
 import com.joltvm.server.handler.TraceStatusHandler;
+import com.joltvm.server.classloader.ClassLoaderService;
 import com.joltvm.server.hotswap.HotSwapService;
 import com.joltvm.server.jvm.JvmInfoService;
+import com.joltvm.server.logger.LoggerService;
 import com.joltvm.server.security.AuditLogService;
 import com.joltvm.server.security.SecurityConfig;
 import com.joltvm.server.security.TokenService;
@@ -78,7 +85,7 @@ public final class APIRoutes {
     private static final Logger LOG = Logger.getLogger(APIRoutes.class.getName());
 
     /** Total number of registered API endpoints. */
-    static final int ROUTE_COUNT = 30;
+    static final int ROUTE_COUNT = 35;
 
     /**
      * Immutable holder for shared service instances, ensuring atomic publication
@@ -176,6 +183,8 @@ public final class APIRoutes {
         SpringContextService springService = new SpringContextService();
         ThreadDiagnosticsService threadService = new ThreadDiagnosticsService();
         JvmInfoService jvmInfoService = new JvmInfoService();
+        ClassLoaderService classLoaderService = new ClassLoaderService();
+        LoggerService loggerService = new LoggerService();
 
         String auditFilePath = agentArgs.get("auditFile");
         AuditLogService auditLogService = auditFilePath != null
@@ -220,6 +229,15 @@ public final class APIRoutes {
         router.addRoute(HttpMethod.GET, "/api/jvm/sysprops", new SysPropsHandler(jvmInfoService));
         router.addRoute(HttpMethod.GET, "/api/jvm/sysenv", new SysEnvHandler(jvmInfoService));
         router.addRoute(HttpMethod.GET, "/api/jvm/classpath", new ClasspathHandler(jvmInfoService));
+
+        // ClassLoader analysis endpoints
+        router.addRoute(HttpMethod.GET, "/api/classloaders", new ClassLoaderTreeHandler(classLoaderService));
+        router.addRoute(HttpMethod.GET, "/api/classloaders/conflicts", new ClassLoaderConflictsHandler(classLoaderService));
+        router.addRoute(HttpMethod.GET, "/api/classloaders/{id}/classes", new ClassLoaderClassesHandler(classLoaderService));
+
+        // Logger endpoints
+        router.addRoute(HttpMethod.GET, "/api/loggers", new LoggerListHandler(loggerService));
+        router.addRoute(HttpMethod.PUT, "/api/loggers/{name}", new LoggerUpdateHandler(loggerService));
 
         // Security & audit endpoints
         router.addRoute(HttpMethod.POST, "/api/auth/login", new LoginHandler(securityConfig, tokenService));

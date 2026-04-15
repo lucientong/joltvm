@@ -16,14 +16,14 @@
 
 package com.joltvm.server.handler;
 
-import com.joltvm.server.thread.ThreadDiagnosticsService;
+import com.joltvm.server.logger.JulAdapter;
+import com.joltvm.server.logger.LoggerService;
 import io.netty.handler.codec.http.DefaultFullHttpRequest;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -31,45 +31,18 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Tests for {@link ThreadListHandler}.
- */
-class ThreadListHandlerTest {
-
-    private ThreadListHandler handler;
-
-    @BeforeEach
-    void setUp() {
-        handler = new ThreadListHandler(new ThreadDiagnosticsService());
-    }
+class LoggerListHandlerTest {
 
     @Test
-    void returns200WithThreadList() {
+    void returns200WithLoggerData() {
+        LoggerListHandler handler = new LoggerListHandler(new LoggerService(new JulAdapter()));
         FullHttpRequest request = new DefaultFullHttpRequest(
-                HttpVersion.HTTP_1_1, HttpMethod.GET, "/api/threads");
+                HttpVersion.HTTP_1_1, HttpMethod.GET, "/api/loggers");
         FullHttpResponse response = handler.handle(request, Map.of());
 
         assertEquals(HttpResponseStatus.OK, response.status());
         String body = response.content().toString(StandardCharsets.UTF_8);
-        assertTrue(body.contains("\"threads\""), "Response should contain threads array");
-        assertTrue(body.contains("\"count\""), "Response should contain count");
-    }
-
-    @Test
-    void filterByValidState() {
-        FullHttpRequest request = new DefaultFullHttpRequest(
-                HttpVersion.HTTP_1_1, HttpMethod.GET, "/api/threads?state=RUNNABLE");
-        FullHttpResponse response = handler.handle(request, Map.of());
-
-        assertEquals(HttpResponseStatus.OK, response.status());
-    }
-
-    @Test
-    void filterByInvalidState() {
-        FullHttpRequest request = new DefaultFullHttpRequest(
-                HttpVersion.HTTP_1_1, HttpMethod.GET, "/api/threads?state=INVALID");
-        FullHttpResponse response = handler.handle(request, Map.of());
-
-        assertEquals(HttpResponseStatus.BAD_REQUEST, response.status());
+        assertTrue(body.contains("\"framework\""));
+        assertTrue(body.contains("\"loggers\""));
     }
 }

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-04-16
+
+### Added
+- **ClassLoader Analysis** (`ClassLoaderService`) — Enumerates all loaded classes via `Instrumentation.getAllLoadedClasses()`, groups by ClassLoader, builds parent-child hierarchy tree, and detects class conflicts (same FQCN loaded by multiple ClassLoaders).
+- **REST API: `GET /api/classloaders`** — ClassLoader hierarchy tree with each node showing loader name, class name, loaded class count, parent info, and children.
+- **REST API: `GET /api/classloaders/{id}/classes`** — Paginated list of classes loaded by a specific ClassLoader, with search filter. Max 5000 classes per page.
+- **REST API: `GET /api/classloaders/conflicts`** — Detects classes loaded by multiple ClassLoaders (potential classpath conflicts).
+- **Logger Dynamic Level** (`LoggerService`) — Auto-detects logging framework (Logback > Log4j2 > JUL) via reflection with zero compile-time dependencies. Supports listing all loggers and dynamically changing log levels at runtime.
+- **LoggerAdapter Interface** — Pluggable adapter pattern with three implementations: `LogbackAdapter`, `Log4j2Adapter`, `JulAdapter`. All use reflection for framework interaction.
+- **REST API: `GET /api/loggers`** — Lists all loggers with framework name, current level, and effective level.
+- **REST API: `PUT /api/loggers/{name}`** — Dynamically changes a logger's level. Returns previous and new level. Requires OPERATOR role.
+- **Web UI: ClassLoaders Tab** — Tree view of ClassLoader hierarchy with class counts, browse button to view loaded classes, conflict detection with warning badges.
+- **Web UI: Loggers Tab** — Searchable logger list with inline level dropdown and Set button for dynamic level changes. Framework name and logger count displayed.
+- **Codecov CI Fix** — Added explicit JaCoCo report collection step before codecov-action upload to resolve glob pattern issue with codecov-action@v5.
+
+### Changed
+- `APIRoutes` now registers 35 routes (was 30): added 3 ClassLoader endpoints + 2 Logger endpoints
+- `RoutePermissions` updated with ClassLoader (VIEWER) and Logger (GET: VIEWER, PUT: OPERATOR) permissions
+- Updated project version to 0.12.0
+
 ## [0.11.0] - 2026-04-15
 
 ### Added
