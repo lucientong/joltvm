@@ -379,12 +379,21 @@ public class MethodTraceService {
      */
     public void reset() {
         stopTrace();
-        stopSampling();
-        collector.clear();
+        // Shut down the scheduler first and wait for any in-flight sampling task to finish
+        // before clearing, to avoid a race where samples are added after clear().
         if (scheduler != null) {
             scheduler.shutdownNow();
+            try {
+                scheduler.awaitTermination(200, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
             scheduler = null;
         }
+        sampling.set(false);
+        samplingFuture = null;
+        samplingStopFuture = null;
+        collector.clear();
     }
 
     /**
