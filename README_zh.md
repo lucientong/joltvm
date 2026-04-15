@@ -4,6 +4,7 @@
 [![CI](https://github.com/lucientong/joltvm/actions/workflows/ci.yml/badge.svg)](https://github.com/lucientong/joltvm/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/lucientong/joltvm/graph/badge.svg)](https://codecov.io/gh/lucientong/joltvm)
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.lucientong/joltvm-agent)](https://central.sonatype.com/artifact/io.github.lucientong/joltvm-agent)
+[![Docker Pulls](https://img.shields.io/docker/pulls/lucientong/joltvm)](https://hub.docker.com/r/lucientong/joltvm)
 [![Java](https://img.shields.io/badge/Java-17%2B-orange.svg)](https://openjdk.org/)
 [![Build](https://img.shields.io/badge/build-Gradle-02303A.svg)](https://gradle.org/)
 
@@ -150,7 +151,7 @@ implementation("io.github.lucientong:joltvm-agent:0.7.0")
 - [x] **Phase 7**：安全审计（RBAC + 令牌认证 + 审计日志 + 导出）
 - [x] **Phase 8**：安全加固（PBKDF2 密码哈希、Bug 修复、线程安全）
 - [x] **Phase 9**：线程诊断（线程列表、CPU Top-N、死锁检测）
-- [ ] **Phase 10**：JVM 仪表盘增强（GC 统计、系统属性、Classpath）
+- [x] **Phase 10**：JVM 仪表盘增强（GC 统计、系统属性、Classpath）
 - [ ] **Phase 11**：ClassLoader 分析 + Logger 动态调级
 - [ ] **Phase 12**：OGNL 表达式引擎（运行时对象查看）
 - [ ] **Phase 13**：Watch 命令（OGNL 条件过滤的方法观察）

@@ -4,6 +4,7 @@
 [![CI](https://github.com/lucientong/joltvm/actions/workflows/ci.yml/badge.svg)](https://github.com/lucientong/joltvm/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/lucientong/joltvm/graph/badge.svg)](https://codecov.io/gh/lucientong/joltvm)
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.lucientong/joltvm-agent)](https://central.sonatype.com/artifact/io.github.lucientong/joltvm-agent)
+[![Docker Pulls](https://img.shields.io/docker/pulls/lucientong/joltvm)](https://hub.docker.com/r/lucientong/joltvm)
 [![Java](https://img.shields.io/badge/Java-17%2B-orange.svg)](https://openjdk.org/)
 [![Build](https://img.shields.io/badge/build-Gradle-02303A.svg)](https://gradle.org/)
 
@@ -17,7 +18,7 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ## ✨ Features
 
-> JoltVM is under active development. Phase 1 through Phase 9 are complete. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 through Phase 10 are complete. See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, interactive flame graphs (d3-flame-graph), class/method tree navigation, Spring Boot bean browser, and audit dashboard. Edit code and apply hot-fixes visually — all served from the embedded Netty server at `http://localhost:7758`.
@@ -193,7 +194,7 @@ CMD ["java", "-javaagent:/opt/joltvm/joltvm-agent.jar", "-jar", "your-app.jar"]
 - [x] **Phase 7**: Security & Audit (RBAC + token auth + audit log + export)
 - [x] **Phase 8**: Security hardening (PBKDF2 password hashing, bug fixes, thread safety)
 - [x] **Phase 9**: Thread diagnostics (thread list, CPU top-N, deadlock detection)
-- [ ] **Phase 10**: JVM dashboard enhancement (GC stats, system properties, classpath)
+- [x] **Phase 10**: JVM dashboard enhancement (GC stats, system properties, classpath)
 - [ ] **Phase 11**: ClassLoader analysis + Logger dynamic level adjustment
 - [ ] **Phase 12**: OGNL expression engine (runtime object inspection)
 - [ ] **Phase 13**: Watch command (conditional method observation with OGNL filters)

@@ -107,6 +107,12 @@ const JoltAPI = (() => {
         },
         threadDetail: (id) => request('GET', '/api/threads/' + id),
         threadDeadlocks: () => request('GET', '/api/threads/deadlocks'),
-        threadDump: () => request('GET', '/api/threads/dump')
+        threadDump: () => request('GET', '/api/threads/dump'),
+
+        // JVM Info
+        jvmGc: () => request('GET', '/api/jvm/gc'),
+        jvmSysProps: () => request('GET', '/api/jvm/sysprops'),
+        jvmSysEnv: () => request('GET', '/api/jvm/sysenv'),
+        jvmClasspath: () => request('GET', '/api/jvm/classpath')
     };
 })();
