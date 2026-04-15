@@ -149,7 +149,7 @@ implementation("io.github.lucientong:joltvm-agent:0.7.0")
 - [x] **Phase 6**：Web UI（Monaco Editor + 火焰图 + 仪表盘 + Spring 面板）
 - [x] **Phase 7**：安全审计（RBAC + 令牌认证 + 审计日志 + 导出）
 - [x] **Phase 8**：安全加固（PBKDF2 密码哈希、Bug 修复、线程安全）
-- [ ] **Phase 9**：线程诊断（线程列表、CPU Top-N、死锁检测）
+- [x] **Phase 9**：线程诊断（线程列表、CPU Top-N、死锁检测）
 - [ ] **Phase 10**：JVM 仪表盘增强（GC 统计、系统属性、Classpath）
 - [ ] **Phase 11**：ClassLoader 分析 + Logger 动态调级
 - [ ] **Phase 12**：OGNL 表达式引擎（运行时对象查看）

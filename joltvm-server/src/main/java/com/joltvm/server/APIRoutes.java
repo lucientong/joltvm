@@ -32,6 +32,11 @@ import com.joltvm.server.handler.HotSwapHistoryHandler;
 import com.joltvm.server.handler.LoginHandler;
 import com.joltvm.server.handler.RequestMappingHandler;
 import com.joltvm.server.handler.RollbackHandler;
+import com.joltvm.server.handler.ThreadDeadlockHandler;
+import com.joltvm.server.handler.ThreadDetailHandler;
+import com.joltvm.server.handler.ThreadDumpHandler;
+import com.joltvm.server.handler.ThreadListHandler;
+import com.joltvm.server.handler.ThreadTopHandler;
 import com.joltvm.server.handler.TraceFlameGraphHandler;
 import com.joltvm.server.handler.TraceHandler;
 import com.joltvm.server.handler.TraceListHandler;
@@ -41,6 +46,7 @@ import com.joltvm.server.security.AuditLogService;
 import com.joltvm.server.security.SecurityConfig;
 import com.joltvm.server.security.TokenService;
 import com.joltvm.server.spring.SpringContextService;
+import com.joltvm.server.thread.ThreadDiagnosticsService;
 import com.joltvm.server.tracing.MethodTraceService;
 import io.netty.handler.codec.http.HttpMethod;
 
@@ -67,7 +73,7 @@ public final class APIRoutes {
     private static final Logger LOG = Logger.getLogger(APIRoutes.class.getName());
 
     /** Total number of registered API endpoints. */
-    static final int ROUTE_COUNT = 21;
+    static final int ROUTE_COUNT = 26;
 
     /**
      * Immutable holder for shared service instances, ensuring atomic publication
@@ -163,6 +169,7 @@ public final class APIRoutes {
         HotSwapService hotSwapService = new HotSwapService();
         MethodTraceService traceService = new MethodTraceService();
         SpringContextService springService = new SpringContextService();
+        ThreadDiagnosticsService threadService = new ThreadDiagnosticsService();
 
         String auditFilePath = agentArgs.get("auditFile");
         AuditLogService auditLogService = auditFilePath != null
@@ -194,6 +201,13 @@ public final class APIRoutes {
         router.addRoute(HttpMethod.GET, "/api/spring/mappings", new RequestMappingHandler(springService));
         router.addRoute(HttpMethod.GET, "/api/spring/dependencies", new DependencyGraphHandler(springService));
         router.addRoute(HttpMethod.GET, "/api/spring/dependencies/{beanName}", new DependencyChainHandler(springService));
+
+        // Thread diagnostics endpoints
+        router.addRoute(HttpMethod.GET, "/api/threads", new ThreadListHandler(threadService));
+        router.addRoute(HttpMethod.GET, "/api/threads/top", new ThreadTopHandler(threadService));
+        router.addRoute(HttpMethod.GET, "/api/threads/deadlocks", new ThreadDeadlockHandler(threadService));
+        router.addRoute(HttpMethod.GET, "/api/threads/dump", new ThreadDumpHandler(threadService));
+        router.addRoute(HttpMethod.GET, "/api/threads/{id}", new ThreadDetailHandler(threadService));
 
         // Security & audit endpoints
         router.addRoute(HttpMethod.POST, "/api/auth/login", new LoginHandler(securityConfig, tokenService));

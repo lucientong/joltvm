@@ -95,6 +95,18 @@ const JoltAPI = (() => {
         springDependencyChain: (name) => request('GET', '/api/spring/dependencies/' + encodeURIComponent(name)),
 
         // Audit
-        auditExport: (format) => request('GET', '/api/audit/export' + (format ? '?format=' + format : ''))
+        auditExport: (format) => request('GET', '/api/audit/export' + (format ? '?format=' + format : '')),
+
+        // Threads
+        threadList: (state) => request('GET', '/api/threads' + (state ? '?state=' + state : '')),
+        threadTop: (n, interval) => {
+            const params = new URLSearchParams();
+            if (n != null) params.set('n', n);
+            if (interval != null) params.set('interval', interval);
+            return request('GET', '/api/threads/top?' + params.toString());
+        },
+        threadDetail: (id) => request('GET', '/api/threads/' + id),
+        threadDeadlocks: () => request('GET', '/api/threads/deadlocks'),
+        threadDump: () => request('GET', '/api/threads/dump')
     };
 })();

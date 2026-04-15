@@ -1,0 +1,36 @@
+# =============================================================================
+# .dockerignore — Exclude files from Docker build context
+# =============================================================================
+
+# Git
+.git
+.gitignore
+
+# Gradle build outputs (rebuilt inside the container)
+build/
+*/build/
+.gradle/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# CI/CD & docs (not needed in the image)
+.github/
+docs/
+*.md
+LICENSE
+CHANGELOG.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
