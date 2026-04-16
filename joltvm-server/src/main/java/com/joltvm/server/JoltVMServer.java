@@ -26,6 +26,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.stream.ChunkedWriteHandler;
@@ -34,6 +35,8 @@ import com.joltvm.server.handler.StaticFileHandler;
 import com.joltvm.server.security.SecurityConfig;
 import com.joltvm.server.security.TokenService;
 import com.joltvm.server.tracing.MethodTraceService;
+import com.joltvm.server.websocket.SubscriptionManager;
+import com.joltvm.server.websocket.WebSocketFrameHandler;
 
 import java.io.File;
 import java.util.Map;
@@ -87,6 +90,8 @@ public final class JoltVMServer {
      */
     private final SslContext sslContext;
 
+    private final SubscriptionManager subscriptionManager;
+
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     private EventLoopGroup bossGroup;
@@ -138,6 +143,7 @@ public final class JoltVMServer {
         this.securityConfig = new SecurityConfig(secEnabled, adminPwd);
         this.tokenService = new TokenService();
         this.sslContext = buildSslContext(agentArgs.get("tlsCert"), agentArgs.get("tlsKey"));
+        this.subscriptionManager = new SubscriptionManager();
     }
 
     /**
@@ -157,6 +163,7 @@ public final class JoltVMServer {
         this.securityConfig = Objects.requireNonNull(securityConfig, "securityConfig");
         this.tokenService = Objects.requireNonNull(tokenService, "tokenService");
         this.sslContext = null;
+        this.subscriptionManager = new SubscriptionManager();
     }
 
     /**
@@ -192,6 +199,8 @@ public final class JoltVMServer {
                                     new HttpServerCodec(),
                                     new HttpObjectAggregator(MAX_CONTENT_LENGTH),
                                     new ChunkedWriteHandler(),
+                                    new WebSocketServerProtocolHandler("/ws", null, true),
+                                    new WebSocketFrameHandler(subscriptionManager),
                                     new HttpDispatcherHandler(router, staticFileHandler,
                                             securityConfig, tokenService)
                             );
@@ -228,6 +237,16 @@ public final class JoltVMServer {
                 LOG.info("MethodTraceService stopped");
             } catch (Exception e) {
                 LOG.log(Level.WARNING, "Error stopping MethodTraceService", e);
+            }
+        }
+
+        // Stop WebSocket subscriptions
+        if (subscriptionManager != null) {
+            try {
+                subscriptionManager.shutdown();
+                LOG.info("SubscriptionManager stopped");
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Error stopping SubscriptionManager", e);
             }
         }
 
@@ -287,6 +306,15 @@ public final class JoltVMServer {
      */
     public TokenService getTokenService() {
         return tokenService;
+    }
+
+    /**
+     * Returns the WebSocket subscription manager.
+     *
+     * @return the subscription manager
+     */
+    public SubscriptionManager getSubscriptionManager() {
+        return subscriptionManager;
     }
 
     /**
