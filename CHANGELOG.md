@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-04-16
+
+### Added
+- **WebSocket Real-time Push** (`SubscriptionManager`) — Full WebSocket support for real-time data push to browser clients. Manages subscriptions per channel with automatic periodic push from registered data providers.
+- **Netty Pipeline Upgrade** — Added `WebSocketServerProtocolHandler` at `/ws` path to the Netty pipeline. WebSocket and HTTP coexist on the same port. WebSocket handshake and frame handling are additive — existing HTTP API is unchanged.
+- **WebSocket Frame Handler** (`WebSocketFrameHandler`) — Handles text frames (subscribe/unsubscribe/ping), ping/pong keep-alive, and graceful close. Delegates to SubscriptionManager.
+- **Subscription Protocol** — JSON-based client-server protocol. Client sends `subscribe`/`unsubscribe`/`ping`, server pushes `data`/`subscribed`/`unsubscribed`/`pong`/`error`. Supported channels: `threads.top` (5s), `gc.stats` (10s), `jvm.memory` (5s).
+- **WebSocket Client JS** (`websocket.js`) — Auto-reconnect with exponential backoff (1s → 30s max). Subscribe/unsubscribe API. REST fallback when WebSocket is unavailable. Token authentication via query parameter.
+- **Web UI: Connection Status Indicator** — Green/red dot next to the status bar showing WebSocket connection state. Tooltip shows connection details.
+- **12 new tests** — SubscriptionManager (12: connect/disconnect, subscribe/unsubscribe, ping/pong, invalid messages, supported channels)
+
+### Changed
+- `JoltVMServer` Netty pipeline now includes `WebSocketServerProtocolHandler` + `WebSocketFrameHandler` before `HttpDispatcherHandler`
+- `JoltVMServer.stop()` now also shuts down `SubscriptionManager`
+- Updated project version to 0.16.0
+
 ## [0.15.0] - 2026-04-16
 
 ### Added
