@@ -42,6 +42,7 @@ import com.joltvm.server.handler.LoginHandler;
 import com.joltvm.server.handler.LoggerListHandler;
 import com.joltvm.server.handler.LoggerUpdateHandler;
 import com.joltvm.server.handler.OgnlEvalHandler;
+import com.joltvm.server.handler.PluginListHandler;
 import com.joltvm.server.handler.RequestMappingHandler;
 import com.joltvm.server.handler.RollbackHandler;
 import com.joltvm.server.handler.SysEnvHandler;
@@ -66,6 +67,7 @@ import com.joltvm.server.jvm.JvmInfoService;
 import com.joltvm.server.logger.LoggerService;
 import com.joltvm.server.ognl.OgnlService;
 import com.joltvm.server.profiler.AsyncProfilerService;
+import com.joltvm.server.plugin.PluginLifecycleManager;
 import com.joltvm.server.watch.WatchService;
 import com.joltvm.server.security.AuditLogService;
 import com.joltvm.server.security.SecurityConfig;
@@ -98,7 +100,7 @@ public final class APIRoutes {
     private static final Logger LOG = Logger.getLogger(APIRoutes.class.getName());
 
     /** Total number of registered API endpoints. */
-    static final int ROUTE_COUNT = 45;
+    static final int ROUTE_COUNT = 46;
 
     /**
      * Immutable holder for shared service instances, ensuring atomic publication
@@ -201,6 +203,7 @@ public final class APIRoutes {
         OgnlService ognlService = new OgnlService();
         WatchService watchService = new WatchService();
         AsyncProfilerService asyncProfilerService = new AsyncProfilerService();
+        PluginLifecycleManager pluginManager = new PluginLifecycleManager(router);
 
         String auditFilePath = agentArgs.get("auditFile");
         AuditLogService auditLogService = auditFilePath != null
@@ -276,6 +279,15 @@ public final class APIRoutes {
         router.addRoute(HttpMethod.GET, "/api/auth/status", new AuthStatusHandler(securityConfig, tokenService));
         router.addRoute(HttpMethod.GET, "/api/audit/export", new AuditExportHandler(auditLogService));
 
-        LOG.info("Registered " + ROUTE_COUNT + " API routes");
+        // Plugin system
+        router.addRoute(HttpMethod.GET, "/api/plugins", new PluginListHandler(pluginManager));
+
+        // Discover and load plugins (adds dynamic routes)
+        int pluginCount = pluginManager.discoverAndLoad();
+        if (pluginCount > 0) {
+            LOG.info("Loaded " + pluginCount + " plugin(s)");
+        }
+
+        LOG.info("Registered " + ROUTE_COUNT + " API routes (+ plugin routes)");
     }
 }

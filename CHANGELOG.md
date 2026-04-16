@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-04-16
+
+### Added
+- **Plugin/SPI Extension Mechanism** — Full plugin system based on Java SPI (`ServiceLoader`).
+- **JoltVMPlugin SPI Interface** — Defines plugin lifecycle: `onLoad(PluginContext)` → `onStart()` → `onStop()`. Plugins can contribute REST routes (auto-prefixed `/api/plugins/{id}/`) and web assets.
+- **PluginContext** — Context object providing plugins access to the HTTP router and a namespaced logger.
+- **RouteDefinition** — Record type for defining plugin-contributed REST routes with convenience `get()`/`post()` factory methods.
+- **PluginLifecycleManager** — Discovers plugin JARs from `plugins/` directory, creates isolated `URLClassLoader` per JAR, loads via ServiceLoader, validates plugin IDs (rejects duplicates and invalid chars), registers routes, and manages lifecycle.
+- **REST API: `GET /api/plugins`** — Lists all loaded plugins with id, name, version, source JAR, route count, and web asset count.
+- **Codecov CI Fix (v2)** — Moved `CODECOV_TOKEN` from `env` to `with.token` parameter for `codecov-action@v5` compatibility. Added `codecov/test-results-action@v1` for Test Analytics integration (JUnit XML upload).
+- **8 new tests** — PluginLifecycleManager (4), PluginContext (1), RouteDefinition (2), PluginListHandler (1)
+
+### Changed
+- `APIRoutes` now registers 46 routes (was 45): added plugin list endpoint. Plugin discovery adds dynamic routes at startup.
+- `RoutePermissions` updated with plugin endpoint permission (VIEWER role)
+- Updated project version to 0.17.0
+
 ## [0.16.0] - 2026-04-16
 
 ### Added
