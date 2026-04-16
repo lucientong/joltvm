@@ -157,7 +157,7 @@ implementation("io.github.lucientong:joltvm-agent:0.7.0")
 - [x] **Phase 13**：Watch 命令（OGNL 条件过滤的方法观察）
 - [x] **Phase 14**：async-profiler 集成（CPU/Alloc/Lock 分析）
 - [x] **Phase 15**：WebSocket 实时推送
-- [ ] **Phase 16**：Plugin/SPI 扩展机制
+- [x] **Phase 16**：Plugin/SPI 扩展机制
 - [ ] **Phase 17**：Tunnel Server 远程诊断 → v1.0.0 正式发布
 
 ---

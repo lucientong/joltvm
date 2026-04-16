@@ -114,7 +114,10 @@ public final class RoutePermissions {
             Map.entry("GET:/api/profiler/async/status", Role.VIEWER),
             Map.entry("POST:/api/profiler/async/start", Role.OPERATOR),
             Map.entry("POST:/api/profiler/async/stop", Role.OPERATOR),
-            Map.entry("GET:/api/profiler/async/flamegraph", Role.VIEWER)
+            Map.entry("GET:/api/profiler/async/flamegraph", Role.VIEWER),
+
+            // Plugin endpoints
+            Map.entry("GET:/api/plugins", Role.VIEWER)
     );
 
     /**

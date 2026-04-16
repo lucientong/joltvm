@@ -54,12 +54,17 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.java == '17' && steps.jacoco.outputs.files != ''
         uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ steps.jacoco.outputs.files }}
           flags: unittests
           fail_ci_if_error: false
           verbose: true
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results to Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.java == '17' && !cancelled()
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload test reports
         if: failure()
