@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-04-16
+
+### Added
+- **OGNL Expression Engine** (`OgnlService`) — Safe OGNL expression evaluation against JVM runtime objects. Defense-in-depth security with four layers: pre-parse expression validation, MemberAccess sandbox, execution timeout (5s), and result depth limiting.
+- **Security Sandbox** (`SafeOgnlMemberAccess`) — Comprehensive security sandbox blocking 60+ dangerous classes (Runtime, ProcessBuilder, System, Unsafe, ClassLoader, File I/O, Network, Scripting, etc.), 25+ dangerous methods (exec, exit, forName, getMethod, invoke, etc.), and 12+ blocked package prefixes (reflection, JMX, OGNL internals). Class hierarchy traversal ensures subclass access is also blocked.
+- **Result Serializer** (`ResultSerializer`) — Safe JSON serialization with circular reference detection (identity-based), depth limiting (default 5, max 10), collection size limiting (max 200 elements), and graceful degradation for non-serializable objects.
+- **REST API: `POST /api/ognl/eval`** — Evaluate OGNL expressions with configurable result depth. Returns structured response with success/error status, result, type, and execution time. Expression length limited to 4096 characters. Requires OPERATOR role.
+- **Safe Runtime Info** — `#runtime` context variable provides read-only access to JVM info (memory, CPUs, Java version, OS) without exposing dangerous Runtime methods.
+- **Web UI: Expression Tab** — Monospace textarea with Ctrl+Enter execution, preset templates (JVM Memory, CPUs, Java Version, etc.), syntax-highlighted JSON result display, and localStorage-backed expression history (50 entries).
+- **Security Fuzz Tests** — 50+ parameterized test cases covering known OGNL injection vectors from Struts CVEs, Arthas attack patterns, and OWASP payloads. ALL must be blocked. Covers: Runtime.exec, System.exit, reflection chains, MemberAccess override, Unsafe, File I/O, Network, ClassLoader, ScriptEngine, Thread manipulation, serialization, OGNL internals, and Struts2 compound payloads.
+- **Unit Tests** — ResultSerializer (14 tests), SafeOgnlMemberAccess (10 tests), OgnlEvalHandler (5 tests)
+
+### Changed
+- `APIRoutes` now registers 36 routes (was 35): added OGNL eval endpoint
+- `RoutePermissions` updated with OGNL endpoint permission (OPERATOR role)
+- Added `ognl:ognl:3.4.8` dependency to joltvm-server
+- Updated project version to 0.13.0
+
 ## [0.12.0] - 2026-04-16
 
 ### Added

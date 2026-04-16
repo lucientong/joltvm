@@ -128,6 +128,9 @@ const JoltAPI = (() => {
 
         // Loggers
         loggerList: () => request('GET', '/api/loggers'),
-        loggerUpdate: (name, level) => request('PUT', '/api/loggers/' + encodeURIComponent(name), { level })
+        loggerUpdate: (name, level) => request('PUT', '/api/loggers/' + encodeURIComponent(name), { level }),
+
+        // OGNL Expression
+        ognlEval: (expression, resultDepth) => request('POST', '/api/ognl/eval', { expression, resultDepth })
     };
 })();

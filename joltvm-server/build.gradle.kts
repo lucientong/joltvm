@@ -36,4 +36,7 @@ dependencies {
 
     // Unified diff generation for hot-swap audit (Phase 8)
     implementation("io.github.java-diff-utils:java-diff-utils:${property("javaDiffUtilsVersion")}")
+
+    // OGNL expression engine for runtime object inspection (Phase 12)
+    implementation("ognl:ognl:${property("ognlVersion")}")
 }

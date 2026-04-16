@@ -37,6 +37,7 @@ import com.joltvm.server.handler.HotSwapHistoryHandler;
 import com.joltvm.server.handler.LoginHandler;
 import com.joltvm.server.handler.LoggerListHandler;
 import com.joltvm.server.handler.LoggerUpdateHandler;
+import com.joltvm.server.handler.OgnlEvalHandler;
 import com.joltvm.server.handler.RequestMappingHandler;
 import com.joltvm.server.handler.RollbackHandler;
 import com.joltvm.server.handler.SysEnvHandler;
@@ -54,6 +55,7 @@ import com.joltvm.server.classloader.ClassLoaderService;
 import com.joltvm.server.hotswap.HotSwapService;
 import com.joltvm.server.jvm.JvmInfoService;
 import com.joltvm.server.logger.LoggerService;
+import com.joltvm.server.ognl.OgnlService;
 import com.joltvm.server.security.AuditLogService;
 import com.joltvm.server.security.SecurityConfig;
 import com.joltvm.server.security.TokenService;
@@ -85,7 +87,7 @@ public final class APIRoutes {
     private static final Logger LOG = Logger.getLogger(APIRoutes.class.getName());
 
     /** Total number of registered API endpoints. */
-    static final int ROUTE_COUNT = 35;
+    static final int ROUTE_COUNT = 36;
 
     /**
      * Immutable holder for shared service instances, ensuring atomic publication
@@ -185,6 +187,7 @@ public final class APIRoutes {
         JvmInfoService jvmInfoService = new JvmInfoService();
         ClassLoaderService classLoaderService = new ClassLoaderService();
         LoggerService loggerService = new LoggerService();
+        OgnlService ognlService = new OgnlService();
 
         String auditFilePath = agentArgs.get("auditFile");
         AuditLogService auditLogService = auditFilePath != null
@@ -238,6 +241,9 @@ public final class APIRoutes {
         // Logger endpoints
         router.addRoute(HttpMethod.GET, "/api/loggers", new LoggerListHandler(loggerService));
         router.addRoute(HttpMethod.PUT, "/api/loggers/{name}", new LoggerUpdateHandler(loggerService));
+
+        // OGNL expression engine
+        router.addRoute(HttpMethod.POST, "/api/ognl/eval", new OgnlEvalHandler(ognlService));
 
         // Security & audit endpoints
         router.addRoute(HttpMethod.POST, "/api/auth/login", new LoginHandler(securityConfig, tokenService));
