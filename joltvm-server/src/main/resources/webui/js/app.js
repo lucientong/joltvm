@@ -151,6 +151,7 @@
         if (view === 'classloaders') ClassLoadersPanel.loadTree();
         if (view === 'loggers') LoggersPanel.loadLoggers();
         // Expression panel doesn't need auto-load on tab switch
+        if (view === 'watch') WatchPanel.loadWatches();
     }
 
     // ================================================================

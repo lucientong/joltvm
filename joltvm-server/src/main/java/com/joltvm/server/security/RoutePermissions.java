@@ -102,7 +102,13 @@ public final class RoutePermissions {
             Map.entry("PUT:/api/loggers", Role.OPERATOR),
 
             // OGNL expression engine — OPERATOR (executes arbitrary expressions)
-            Map.entry("POST:/api/ognl/eval", Role.OPERATOR)
+            Map.entry("POST:/api/ognl/eval", Role.OPERATOR),
+
+            // Watch command endpoints
+            Map.entry("POST:/api/watch/start", Role.OPERATOR),
+            Map.entry("GET:/api/watch", Role.VIEWER),
+            Map.entry("POST:/api/watch", Role.OPERATOR),
+            Map.entry("DELETE:/api/watch", Role.OPERATOR)
     );
 
     /**

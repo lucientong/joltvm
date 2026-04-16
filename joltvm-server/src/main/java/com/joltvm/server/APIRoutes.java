@@ -51,11 +51,17 @@ import com.joltvm.server.handler.TraceFlameGraphHandler;
 import com.joltvm.server.handler.TraceHandler;
 import com.joltvm.server.handler.TraceListHandler;
 import com.joltvm.server.handler.TraceStatusHandler;
+import com.joltvm.server.handler.WatchDeleteHandler;
+import com.joltvm.server.handler.WatchListHandler;
+import com.joltvm.server.handler.WatchRecordsHandler;
+import com.joltvm.server.handler.WatchStartHandler;
+import com.joltvm.server.handler.WatchStopHandler;
 import com.joltvm.server.classloader.ClassLoaderService;
 import com.joltvm.server.hotswap.HotSwapService;
 import com.joltvm.server.jvm.JvmInfoService;
 import com.joltvm.server.logger.LoggerService;
 import com.joltvm.server.ognl.OgnlService;
+import com.joltvm.server.watch.WatchService;
 import com.joltvm.server.security.AuditLogService;
 import com.joltvm.server.security.SecurityConfig;
 import com.joltvm.server.security.TokenService;
@@ -87,7 +93,7 @@ public final class APIRoutes {
     private static final Logger LOG = Logger.getLogger(APIRoutes.class.getName());
 
     /** Total number of registered API endpoints. */
-    static final int ROUTE_COUNT = 36;
+    static final int ROUTE_COUNT = 41;
 
     /**
      * Immutable holder for shared service instances, ensuring atomic publication
@@ -188,6 +194,7 @@ public final class APIRoutes {
         ClassLoaderService classLoaderService = new ClassLoaderService();
         LoggerService loggerService = new LoggerService();
         OgnlService ognlService = new OgnlService();
+        WatchService watchService = new WatchService();
 
         String auditFilePath = agentArgs.get("auditFile");
         AuditLogService auditLogService = auditFilePath != null
@@ -244,6 +251,13 @@ public final class APIRoutes {
 
         // OGNL expression engine
         router.addRoute(HttpMethod.POST, "/api/ognl/eval", new OgnlEvalHandler(ognlService));
+
+        // Watch command endpoints
+        router.addRoute(HttpMethod.POST, "/api/watch/start", new WatchStartHandler(watchService));
+        router.addRoute(HttpMethod.GET, "/api/watch", new WatchListHandler(watchService));
+        router.addRoute(HttpMethod.POST, "/api/watch/{id}/stop", new WatchStopHandler(watchService));
+        router.addRoute(HttpMethod.GET, "/api/watch/{id}/records", new WatchRecordsHandler(watchService));
+        router.addRoute(HttpMethod.DELETE, "/api/watch/{id}", new WatchDeleteHandler(watchService));
 
         // Security & audit endpoints
         router.addRoute(HttpMethod.POST, "/api/auth/login", new LoginHandler(securityConfig, tokenService));

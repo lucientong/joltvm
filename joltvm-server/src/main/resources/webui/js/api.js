@@ -131,6 +131,14 @@ const JoltAPI = (() => {
         loggerUpdate: (name, level) => request('PUT', '/api/loggers/' + encodeURIComponent(name), { level }),
 
         // OGNL Expression
-        ognlEval: (expression, resultDepth) => request('POST', '/api/ognl/eval', { expression, resultDepth })
+        ognlEval: (expression, resultDepth) => request('POST', '/api/ognl/eval', { expression, resultDepth }),
+
+        // Watch
+        watchStart: (classPattern, methodPattern, conditionExpr, maxRecords, durationMs) =>
+            request('POST', '/api/watch/start', { classPattern, methodPattern, conditionExpr, maxRecords, durationMs }),
+        watchStop: (id) => request('POST', '/api/watch/' + id + '/stop'),
+        watchRecords: (id, since) => request('GET', '/api/watch/' + id + '/records' + (since ? '?since=' + since : '')),
+        watchList: () => request('GET', '/api/watch'),
+        watchDelete: (id) => request('DELETE', '/api/watch/' + id)
     };
 })();

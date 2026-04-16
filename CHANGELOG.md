@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-04-16
+
+### Added
+- **Watch Command** (`WatchService`) — Multiple concurrent method observation sessions (max 10). Each session installs its own Byte Buddy Advice transformer, captures method invocations (args, return values, exceptions, timing), and stores records in a bounded per-session buffer (max 1000). Sessions auto-expire after configured duration (default 60s, max 5min).
+- **WatchSession** — Individual watch session with bounded CopyOnWriteArrayList record buffer, eviction of oldest records on overflow, configurable max records, and automatic expiration.
+- **WatchAdvice** — Byte Buddy Advice class injected into watched methods. Captures arguments (truncated to 200 chars), return values, exception details, and execution duration.
+- **REST API: `POST /api/watch/start`** — Start a new watch session with classPattern, methodPattern, conditionExpr, maxRecords, durationMs parameters.
+- **REST API: `POST /api/watch/{id}/stop`** — Stop a specific watch session and return final summary.
+- **REST API: `GET /api/watch/{id}/records`** — Fetch records from a session with optional `?since=N` pagination.
+- **REST API: `GET /api/watch`** — List all watch sessions (active and stopped) with record counts and status.
+- **REST API: `DELETE /api/watch/{id}`** — Delete a watch session and remove its Advice transformer.
+- **Web UI: Watch Tab** — New tab with class/method input, duration control, New Watch button. Active watches table with status badges, Records/Stop/Delete actions. Record table showing timestamp, method, duration, args, return, exception.
+- **17 new tests** — WatchSession (7), WatchRecord (2), WatchService (7), handler coverage
+
+### Changed
+- `APIRoutes` now registers 41 routes (was 36): added 5 watch command endpoints
+- `RoutePermissions` updated with watch endpoint permissions (start/stop/delete: OPERATOR, list/records: VIEWER)
+- Updated project version to 0.14.0
+
 ## [0.13.0] - 2026-04-16
 
 ### Added
