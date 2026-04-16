@@ -17,6 +17,10 @@
 package com.joltvm.server;
 
 import com.joltvm.server.handler.AuditExportHandler;
+import com.joltvm.server.handler.AsyncProfilerFlameGraphHandler;
+import com.joltvm.server.handler.AsyncProfilerStartHandler;
+import com.joltvm.server.handler.AsyncProfilerStatusHandler;
+import com.joltvm.server.handler.AsyncProfilerStopHandler;
 import com.joltvm.server.handler.AuthStatusHandler;
 import com.joltvm.server.handler.BeanDetailHandler;
 import com.joltvm.server.handler.BeanListHandler;
@@ -61,6 +65,7 @@ import com.joltvm.server.hotswap.HotSwapService;
 import com.joltvm.server.jvm.JvmInfoService;
 import com.joltvm.server.logger.LoggerService;
 import com.joltvm.server.ognl.OgnlService;
+import com.joltvm.server.profiler.AsyncProfilerService;
 import com.joltvm.server.watch.WatchService;
 import com.joltvm.server.security.AuditLogService;
 import com.joltvm.server.security.SecurityConfig;
@@ -93,7 +98,7 @@ public final class APIRoutes {
     private static final Logger LOG = Logger.getLogger(APIRoutes.class.getName());
 
     /** Total number of registered API endpoints. */
-    static final int ROUTE_COUNT = 41;
+    static final int ROUTE_COUNT = 45;
 
     /**
      * Immutable holder for shared service instances, ensuring atomic publication
@@ -195,6 +200,7 @@ public final class APIRoutes {
         LoggerService loggerService = new LoggerService();
         OgnlService ognlService = new OgnlService();
         WatchService watchService = new WatchService();
+        AsyncProfilerService asyncProfilerService = new AsyncProfilerService();
 
         String auditFilePath = agentArgs.get("auditFile");
         AuditLogService auditLogService = auditFilePath != null
@@ -258,6 +264,12 @@ public final class APIRoutes {
         router.addRoute(HttpMethod.POST, "/api/watch/{id}/stop", new WatchStopHandler(watchService));
         router.addRoute(HttpMethod.GET, "/api/watch/{id}/records", new WatchRecordsHandler(watchService));
         router.addRoute(HttpMethod.DELETE, "/api/watch/{id}", new WatchDeleteHandler(watchService));
+
+        // async-profiler endpoints
+        router.addRoute(HttpMethod.GET, "/api/profiler/async/status", new AsyncProfilerStatusHandler(asyncProfilerService));
+        router.addRoute(HttpMethod.POST, "/api/profiler/async/start", new AsyncProfilerStartHandler(asyncProfilerService));
+        router.addRoute(HttpMethod.POST, "/api/profiler/async/stop", new AsyncProfilerStopHandler(asyncProfilerService));
+        router.addRoute(HttpMethod.GET, "/api/profiler/async/flamegraph/{id}", new AsyncProfilerFlameGraphHandler(asyncProfilerService));
 
         // Security & audit endpoints
         router.addRoute(HttpMethod.POST, "/api/auth/login", new LoginHandler(securityConfig, tokenService));

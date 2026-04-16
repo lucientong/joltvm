@@ -140,6 +140,27 @@
                 <div class="placeholder-msg">Start a trace to generate flame graph data</div>
             </div>
             <div class="trace-records" id="traceRecords"></div>
+            <!-- async-profiler section -->
+            <details class="dashboard-section" style="margin-top:16px">
+                <summary>async-profiler (CPU / Alloc / Lock / Wall)</summary>
+                <div class="toolbar" style="margin:8px 0">
+                    <select id="asyncEvent" class="search-input" style="width:auto">
+                        <option value="cpu">CPU</option>
+                        <option value="alloc">Allocation</option>
+                        <option value="lock">Lock</option>
+                        <option value="wall">Wall-clock</option>
+                        <option value="itimer">itimer</option>
+                    </select>
+                    <input type="number" class="search-input" id="asyncDuration" value="30" min="1" max="300" style="width:80px" placeholder="Duration (s)">
+                    <button class="btn btn-primary" id="asyncStartBtn" disabled>Start Profiling</button>
+                    <button class="btn btn-danger" id="asyncStopBtn">Stop</button>
+                    <button class="btn" id="asyncFlameBtn">Load Flame Graph</button>
+                    <button class="btn" id="asyncCheckBtn">Check Status</button>
+                </div>
+                <div id="asyncProfilerStatus" class="status-msg">Click "Check Status" to detect async-profiler</div>
+                <div id="asyncProfilerMsg" class="status-msg"></div>
+                <div id="asyncFlameContainer" class="flamegraph-container"></div>
+            </details>
         </section>
 
         <!-- Threads View -->
@@ -322,6 +343,7 @@
     <script src="js/loggers.js"></script>
     <script src="js/expression.js"></script>
     <script src="js/watch.js"></script>
+    <script src="js/profiler.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
