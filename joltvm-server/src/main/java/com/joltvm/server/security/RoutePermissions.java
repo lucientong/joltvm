@@ -99,7 +99,10 @@ public final class RoutePermissions {
 
             // Logger endpoints — GET is VIEWER, PUT is OPERATOR
             Map.entry("GET:/api/loggers", Role.VIEWER),
-            Map.entry("PUT:/api/loggers", Role.OPERATOR)
+            Map.entry("PUT:/api/loggers", Role.OPERATOR),
+
+            // OGNL expression engine — OPERATOR (executes arbitrary expressions)
+            Map.entry("POST:/api/ognl/eval", Role.OPERATOR)
     );
 
     /**

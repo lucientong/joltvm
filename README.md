@@ -18,7 +18,7 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ## ✨ Features
 
-> JoltVM is under active development. Phase 1 through Phase 11 are complete. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 through Phase 12 are complete. See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, interactive flame graphs (d3-flame-graph), class/method tree navigation, Spring Boot bean browser, and audit dashboard. Edit code and apply hot-fixes visually — all served from the embedded Netty server at `http://localhost:7758`.
@@ -37,6 +37,9 @@ Visualize the ClassLoader hierarchy tree, browse classes by loader, and detect c
 
 ### 📝 Dynamic Logger Level
 Auto-detects logging framework (Logback, Log4j2, JUL) via reflection with zero compile-time dependencies. List all loggers, view effective levels, and change log levels dynamically at runtime — all from the browser.
+
+### 🧮 OGNL Expression Engine
+Evaluate OGNL expressions against the running JVM in a secure sandbox. Four-layer defense-in-depth: pre-parse validation, MemberAccess class/method blacklist (60+ blocked classes), execution timeout (5s), and result depth limiting. 50+ known injection vectors tested and blocked.
 
 ### 🔒 Security & Audit
 HMAC-SHA256 token-based authentication with three-tier RBAC (Viewer / Operator / Admin). Authentication middleware enforces permissions on every API request. Every hot-fix generates an audit entry with timestamp, operator, reason, and diff. Immutable audit logs with JSON Lines and CSV export. Passwords secured with PBKDF2-SHA256 (310,000 iterations). Security can be disabled for development use.
@@ -202,7 +205,7 @@ CMD ["java", "-javaagent:/opt/joltvm/joltvm-agent.jar", "-jar", "your-app.jar"]
 - [x] **Phase 9**: Thread diagnostics (thread list, CPU top-N, deadlock detection)
 - [x] **Phase 10**: JVM dashboard enhancement (GC stats, system properties, classpath)
 - [x] **Phase 11**: ClassLoader analysis + Logger dynamic level adjustment
-- [ ] **Phase 12**: OGNL expression engine (runtime object inspection)
+- [x] **Phase 12**: OGNL expression engine (runtime object inspection)
 - [ ] **Phase 13**: Watch command (conditional method observation with OGNL filters)
 - [ ] **Phase 14**: async-profiler integration (CPU/Alloc/Lock profiling)
 - [ ] **Phase 15**: WebSocket real-time push
