@@ -139,6 +139,13 @@ const JoltAPI = (() => {
         watchStop: (id) => request('POST', '/api/watch/' + id + '/stop'),
         watchRecords: (id, since) => request('GET', '/api/watch/' + id + '/records' + (since ? '?since=' + since : '')),
         watchList: () => request('GET', '/api/watch'),
-        watchDelete: (id) => request('DELETE', '/api/watch/' + id)
+        watchDelete: (id) => request('DELETE', '/api/watch/' + id),
+
+        // async-profiler
+        asyncProfilerStatus: () => request('GET', '/api/profiler/async/status'),
+        asyncProfilerStart: (event, duration, interval) =>
+            request('POST', '/api/profiler/async/start', { event, duration, interval }),
+        asyncProfilerStop: () => request('POST', '/api/profiler/async/stop'),
+        asyncProfilerFlameGraph: (id) => request('GET', '/api/profiler/async/flamegraph/' + id)
     };
 })();

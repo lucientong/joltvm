@@ -108,7 +108,13 @@ public final class RoutePermissions {
             Map.entry("POST:/api/watch/start", Role.OPERATOR),
             Map.entry("GET:/api/watch", Role.VIEWER),
             Map.entry("POST:/api/watch", Role.OPERATOR),
-            Map.entry("DELETE:/api/watch", Role.OPERATOR)
+            Map.entry("DELETE:/api/watch", Role.OPERATOR),
+
+            // async-profiler endpoints
+            Map.entry("GET:/api/profiler/async/status", Role.VIEWER),
+            Map.entry("POST:/api/profiler/async/start", Role.OPERATOR),
+            Map.entry("POST:/api/profiler/async/stop", Role.OPERATOR),
+            Map.entry("GET:/api/profiler/async/flamegraph", Role.VIEWER)
     );
 
     /**

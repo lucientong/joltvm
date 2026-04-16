@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-04-16
+
+### Added
+- **async-profiler Integration** (`AsyncProfilerService`) — Reflection-based integration with async-profiler (no compile-time dependency). Auto-detects native library via system property, environment variable, and common installation paths. Falls back from Java API to command-line mode.
+- **Platform Detection** — Automatically detects async-profiler availability on Linux/macOS. Auto-fallback from `cpu` to `itimer` event when `perf_event_paranoid` blocks hardware counters.
+- **Profiling Modes** — CPU, Allocation, Lock, Wall-clock, and itimer profiling events supported.
+- **Collapsed Stacks → d3-flamegraph** — Parses async-profiler collapsed stack output into d3-flamegraph-compatible JSON tree structure, reusable with the existing flame graph UI.
+- **REST API: `GET /api/profiler/async/status`** — Check async-profiler availability, platform info, native lib path, and active session status.
+- **REST API: `POST /api/profiler/async/start`** — Start profiling with event type, duration, and sampling interval. Returns session ID.
+- **REST API: `POST /api/profiler/async/stop`** — Stop active profiling session. Returns sample count.
+- **REST API: `GET /api/profiler/async/flamegraph/{id}`** — Retrieve d3-compatible flame graph JSON for a profiler session.
+- **Web UI: Profiler Enhancement** — Collapsible async-profiler section added to the Flame Graph tab. Event selector (CPU/Alloc/Lock/Wall/itimer), duration input, Start/Stop/Load Flame Graph buttons, status indicator.
+- **14 new tests** — AsyncProfilerService (11: status, availability, parsing, edge cases), handler tests (3)
+
+### Changed
+- `APIRoutes` now registers 45 routes (was 41): added 4 async-profiler endpoints
+- `RoutePermissions` updated with async-profiler permissions (status/flamegraph: VIEWER, start/stop: OPERATOR)
+- Updated project version to 0.15.0
+
 ## [0.14.0] - 2026-04-16
 
 ### Added
