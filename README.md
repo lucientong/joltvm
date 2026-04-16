@@ -18,7 +18,7 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ## ✨ Features
 
-> JoltVM is under active development. Phase 1 through Phase 12 are complete. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 through Phase 13 are complete. See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, interactive flame graphs (d3-flame-graph), class/method tree navigation, Spring Boot bean browser, and audit dashboard. Edit code and apply hot-fixes visually — all served from the embedded Netty server at `http://localhost:7758`.
@@ -206,7 +206,7 @@ CMD ["java", "-javaagent:/opt/joltvm/joltvm-agent.jar", "-jar", "your-app.jar"]
 - [x] **Phase 10**: JVM dashboard enhancement (GC stats, system properties, classpath)
 - [x] **Phase 11**: ClassLoader analysis + Logger dynamic level adjustment
 - [x] **Phase 12**: OGNL expression engine (runtime object inspection)
-- [ ] **Phase 13**: Watch command (conditional method observation with OGNL filters)
+- [x] **Phase 13**: Watch command (conditional method observation with OGNL filters)
 - [ ] **Phase 14**: async-profiler integration (CPU/Alloc/Lock profiling)
 - [ ] **Phase 15**: WebSocket real-time push
 - [ ] **Phase 16**: Plugin/SPI extension mechanism

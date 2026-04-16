@@ -23,6 +23,7 @@
             <button class="nav-tab" data-view="classloaders">ClassLoaders</button>
             <button class="nav-tab" data-view="loggers">Loggers</button>
             <button class="nav-tab" data-view="expression">Expression</button>
+            <button class="nav-tab" data-view="watch">Watch</button>
             <button class="nav-tab" data-view="spring">Spring</button>
             <button class="nav-tab" data-view="audit">Audit Log</button>
         </nav>
@@ -257,6 +258,22 @@
             </div>
         </section>
 
+        <!-- Watch View -->
+        <section class="view" id="view-watch">
+            <div class="toolbar">
+                <input type="text" class="search-input" id="watchClassPattern" placeholder="Class name (e.g., com.example.MyService)" style="width:280px">
+                <input type="text" class="search-input" id="watchMethodPattern" placeholder="Method (* for all)" style="width:160px">
+                <label>Duration: <input type="number" class="search-input" id="watchDuration" value="60" min="1" max="300" style="width:60px">s</label>
+                <button class="btn btn-primary" id="watchStartBtn">New Watch</button>
+                <button class="btn" id="watchRefresh">Refresh</button>
+                <span id="watchCount" class="thread-counts"></span>
+            </div>
+            <div id="watchListContent">
+                <div class="placeholder-msg">Click Refresh to load watches</div>
+            </div>
+            <div id="watchRecordsPanel" style="margin-top:16px"></div>
+        </section>
+
         <!-- Spring View (continued) -->
             <div class="toolbar">
                 <select id="springView" class="search-input" style="width:auto">
@@ -304,6 +321,7 @@
     <script src="js/classloaders.js"></script>
     <script src="js/loggers.js"></script>
     <script src="js/expression.js"></script>
+    <script src="js/watch.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
