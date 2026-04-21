@@ -12,6 +12,7 @@
   - [joltvm-server](#joltvm-server)
   - [joltvm-cli](#joltvm-cli)
   - [joltvm-ui](#joltvm-ui)
+  - [joltvm-tunnel](#joltvm-tunnel)
 - [核心机制](#核心机制)
   - [Java Instrumentation API](#java-instrumentation-api)
   - [Agent 加载模式](#agent-加载模式)
@@ -21,6 +22,11 @@
   - [方法追踪与火焰图](#方法追踪与火焰图)
   - [Spring Boot 感知](#spring-boot-感知)
   - [嵌入式 Web UI](#嵌入式-web-ui)
+  - [OGNL 表达式引擎](#ognl-表达式引擎)
+  - [Watch 命令](#watch-命令)
+  - [WebSocket 实时推送](#websocket-实时推送)
+  - [Plugin/SPI 扩展机制](#pluginspi-扩展机制)
+  - [Tunnel 远程诊断](#tunnel-远程诊断)
 - [数据流](#数据流)
 - [线程模型](#线程模型)
 - [安全模型](#安全模型)
@@ -150,7 +156,7 @@ Can-Set-Native-Method-Prefix: true
 | `HttpDispatcherHandler` | Netty `SimpleChannelInboundHandler`，将请求通过 `HttpRouter` 分发到 `RouteHandler`。处理 CORS 预检（OPTIONS）、静态文件回退和异常。 |
 | `StaticFileHandler` | 从 classpath `webui/` 目录提供嵌入式 Web UI 静态文件。解析 18+ 种文件扩展名的 MIME 类型，防止路径遍历攻击，设置缓存控制头。 |
 | `HttpResponseHelper` | 构建 JSON、文本和错误响应的工具类，自动添加 Content-Type 和 CORS 头。 |
-| `APIRoutes` | 在初始化时将所有 API 端点注册到路由器。 |
+| `APIRoutes` | 在初始化时将所有 API 端点注册到路由器。管理 46+ 个路由，包括安全审计、线程诊断、JVM 信息、ClassLoader、Logger、OGNL、Watch、Profiler、WebSocket 和插件端点。 |
 | `HealthHandler` | `GET /api/health` — 返回 JVM 状态、PID、运行时间和内存信息。 |
 | `ClassListHandler` | `GET /api/classes` — 分页列出已加载的类，支持包名和搜索过滤。 |
 | `ClassDetailHandler` | `GET /api/classes/{className}` — 类详情（字段、方法、修饰符）。 |
@@ -205,12 +211,37 @@ Can-Set-Native-Method-Prefix: true
 | POST | `/api/auth/login` | 用户名/密码认证，返回 HMAC 令牌 |
 | GET | `/api/auth/status` | 查询当前认证状态 |
 | GET | `/api/audit/export` | 导出审计日志（JSON Lines 或 CSV，需 ADMIN 角色） |
+| GET | `/api/threads` | 列出所有线程（支持 state 过滤） |
+| GET | `/api/threads/top` | CPU Top-N 线程 |
+| GET | `/api/threads/{id}` | 线程详情 + 堆栈 |
+| GET | `/api/threads/deadlocks` | 死锁检测 |
+| GET | `/api/threads/dump` | 文本格式线程 dump（jstack 兼容） |
+| GET | `/api/jvm/gc` | GC 统计（按收集器） |
+| GET | `/api/jvm/sysprops` | 系统属性（敏感值脱敏） |
+| GET | `/api/jvm/sysenv` | 环境变量（敏感值脱敏） |
+| GET | `/api/jvm/classpath` | 运行时 Classpath |
+| GET | `/api/classloaders` | ClassLoader 层次树 |
+| GET | `/api/classloaders/{id}/classes` | 指定 ClassLoader 的类列表 |
+| GET | `/api/classloaders/conflicts` | 类冲突检测 |
+| GET | `/api/loggers` | Logger 列表及级别 |
+| PUT | `/api/loggers/{name}` | 动态修改日志级别 |
+| POST | `/api/ognl/eval` | 执行 OGNL 表达式（沙箱环境） |
+| POST | `/api/watch/start` | 启动方法观察会话 |
+| POST | `/api/watch/{id}/stop` | 停止观察会话 |
+| GET | `/api/watch/{id}/records` | 获取观察记录 |
+| GET | `/api/watch` | 列出活跃观察会话 |
+| DELETE | `/api/watch/{id}` | 删除观察会话 |
+| GET | `/api/profiler/async/status` | async-profiler 可用性 |
+| POST | `/api/profiler/async/start` | 启动 async-profiler 会话 |
+| POST | `/api/profiler/async/stop` | 停止 async-profiler 会话 |
+| GET | `/api/profiler/async/flamegraph/{id}` | Profiler 会话的火焰图数据 |
+| GET | `/api/plugins` | 列出已加载的插件 |
 
 **设计考虑**：
 - 选择 Netty 是因为其极小的内存占用和零外部依赖
 - 运行在独立线程池上，避免干扰应用程序
 - Agent 通过反射（`Class.forName`）加载 Server，避免循环编译依赖
-- WebSocket 支持计划用于实时日志流和实时方法追踪（后续增强）
+- WebSocket 支持位于 `/ws` 路径，提供线程、GC 和内存指标的实时数据推送
 - API 端点遵循 RESTful 约定，统一在 `/api/` 路径下
 - 通过 `StaticFileHandler` 提供静态文件服务，实现嵌入式 Web UI，无需独立前端服务器
 
@@ -261,6 +292,67 @@ Web UI 并非使用独立的 React/TypeScript 项目，而是以原生 HTML + CS
 - **SPA 风格路由**：当 GET 请求没有匹配到 API 路由时，`HttpDispatcherHandler` 回退到 `StaticFileHandler`
 - **路径遍历防护**：`StaticFileHandler` 阻止请求路径中包含 `..` 和 `\`
 - **XSS 防护**：所有用户生成内容在插入 DOM 前通过 `esc()` 工具函数进行转义
+
+### joltvm-tunnel
+
+*（Phase 17 — 已实现为独立服务）*
+
+独立的隧道服务器，支持在无直接网络访问的情况下进行远程 JVM 诊断。Agent 向隧道服务器发起出站 WebSocket 连接；用户通过隧道的 HTTP 反向代理访问远程 Agent。
+
+#### 架构
+
+```
+                           ┌─── 用户浏览器 ────────────┐
+                           │  Tunnel 仪表盘            │
+                           │  或 JoltVM Web IDE        │
+                           │  （通过代理）              │
+                           └──────────┬───────────────┘
+                                      │ HTTP
+                           ┌──────────┴───────────────┐
+                           │  joltvm-tunnel (:8800)    │
+                           │                           │
+                           │  /api/tunnel/agents       │
+                           │  /api/tunnel/agents/{id}  │
+                           │    /proxy/**  ──────────┐ │
+                           │                         │ │
+                           │  /ws/agent ◄────────┐   │ │
+                           │                     │   │ │
+                           │  AgentRegistry      │   │ │
+                           │  RequestCorrelator   │   │ │
+                           └─────────────────────┼───┼─┘
+                                                 │   │
+                        ┌───── WebSocket ─────────┘   │
+                        │   （Agent 出站连接）          │
+                        │                              │
+               ┌────────┴───────────┐     ┌───────────┘
+               │  目标 JVM（防火墙内）│     │ 通过 WS 隧道
+               │                    │◄────┘ 代理的 HTTP 请求
+               │  joltvm-agent      │
+               │  + TunnelClient    │
+               │  + JoltVM Server   │
+               └────────────────────┘
+```
+
+#### 关键类
+
+| 类名 | 职责 |
+|------|------|
+| `TunnelProtocol` | 共享的 JSON WebSocket 协议：`register`、`registered`、`heartbeat`、`heartbeat_ack`、`request`、`response`、`error`。 |
+| `AgentRegistry` | 线程安全的 Agent 注册表。预共享 Token 验证、心跳跟踪、Channel → Agent 反向索引。 |
+| `RequestCorrelator` | 通过 `CompletableFuture` 实现异步请求/响应关联。30 秒自动超时，断连时批量取消。 |
+| `TunnelServer` | 独立 Netty 服务器。双管道：WebSocket（`/ws/agent`）+ HTTP（REST API 和仪表盘）。 |
+| `AgentWebSocketHandler` | 处理 Agent 注册、心跳和代理响应。 |
+| `TunnelHttpHandler` | HTTP 处理器，提供 Tunnel REST API 和仪表盘静态文件。通过 WebSocket 将请求反向代理到 Agent。 |
+| `TunnelClient`（在 joltvm-server 中） | Agent 侧出站 WebSocket 客户端。自动重连（1s→30s 指数退避）、心跳保活（30s）、代理请求转发到本地 JoltVM Server。 |
+
+#### Tunnel REST API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/tunnel/health` | Tunnel 服务器健康状态（版本、Agent 数量、待处理请求） |
+| GET | `/api/tunnel/agents` | 列出已连接的 Agent 及其元数据 |
+| GET | `/api/tunnel/agents/{id}` | Agent 详情（元数据、状态、远程地址） |
+| * | `/api/tunnel/agents/{id}/proxy/**` | 反向代理 — 转发到 Agent 的本地 JoltVM Server |
 
 ---
 
@@ -604,6 +696,49 @@ HTTP GET 请求
 - **Classpath 加载**：通过 `ClassLoader.getResourceAsStream()` 从 `webui/` 基础目录读取文件
 - **默认文档**：对 `/` 的请求自动提供 `index.html`
 
+### OGNL 表达式引擎
+
+*（Phase 13 — 已实现）*
+
+JoltVM 提供安全的 OGNL 表达式引擎，用于运行时对象检查。四层纵深防御安全机制：
+
+1. **预解析验证** — 基于正则的表达式扫描（OGNL 解析前）
+2. **MemberAccess 沙箱**（`SafeOgnlMemberAccess`）— 60+ 个被阻止的类（Runtime、ProcessBuilder、Unsafe、ClassLoader、File、Network 等）、25+ 个被阻止的方法、12+ 个被阻止的包前缀，含类继承链遍历
+3. **执行超时** — 通过 `Future.get(5, SECONDS)` 在专用线程中实现 5 秒超时
+4. **结果深度限制**（`ResultSerializer`）— 基于 identity 的循环引用检测、深度限制（默认 5，最大 10）、集合大小限制（200）
+
+### Watch 命令
+
+*（Phase 14 — 已实现）*
+
+支持多个并发方法观察会话（最多 10 个）。每个 `WatchSession` 拥有独立的 Byte Buddy `ResettableClassFileTransformer`。OGNL 上下文变量：`#args`、`#returnObj`、`#throwExp`、`#cost`、`#target`、`#clazz`。会话在可配置的持续时间后自动过期（默认 60 秒，最大 5 分钟）。
+
+### WebSocket 实时推送
+
+*（Phase 16 — 已实现）*
+
+Netty 管道包含 `WebSocketServerProtocolHandler`（路径 `/ws`）。基于 JSON 的发布/订阅协议，支持频道：`threads.top`（5 秒）、`gc.stats`（10 秒）、`jvm.memory`（5 秒）。`SubscriptionManager` 管理每频道订阅并定期推送数据。客户端 `websocket.js` 提供自动重连（指数退避）和 REST 降级回退。
+
+### Plugin/SPI 扩展机制
+
+*（Phase 17 — 已实现）*
+
+`JoltVMPlugin` SPI 接口通过 `ServiceLoader` 从 `plugins/` 目录加载。每个插件 JAR 获得独立的 `URLClassLoader` 以实现隔离。插件可以贡献 REST 路由（自动添加 `/api/plugins/{id}/` 前缀）和 Web 资源。`PluginLifecycleManager` 处理发现、ID 验证、路由注册和生命周期管理。
+
+### Tunnel 远程诊断
+
+*（Phase 17 — 已实现）*
+
+参见上方 [joltvm-tunnel](#joltvm-tunnel) 模块。Tunnel 支持在无需开放入站端口的情况下诊断防火墙或 Kubernetes Pod 内的 JVM。
+
+```
+Agent → TunnelClient → 出站 WS → TunnelServer → AgentRegistry
+                                        ↕
+用户 → HTTP 请求 → TunnelHttpHandler → RequestCorrelator → WS 帧 → Agent
+                                        ↕
+Agent → WS 响应 → RequestCorrelator.complete() → HTTP 响应 → 用户
+```
+
 ---
 
 ## 数据流
@@ -643,6 +778,9 @@ JoltVM 的设计目标是最小化对目标应用的影响：
 | Netty boss group（1 线程） | 接受传入的 HTTP/WS 连接 | 可忽略 |
 | Netty worker group（2 线程） | 处理 HTTP 请求和 WebSocket 帧 | 低 — 仅在诊断时活跃 |
 | 性能采样线程 | 定期栈采样用于火焰图 | 可配置采样间隔 |
+| WebSocket 推送调度器（1 线程） | 定期向 WebSocket 订阅者推送数据 | 低 — 守护线程，5-10 秒间隔 |
+| Tunnel 客户端 I/O（1 线程） | 到 Tunnel Server 的出站 WebSocket | 可忽略 — 仅在配置 Tunnel 时 |
+| Tunnel 心跳调度器 | 定期心跳到 Tunnel Server（30 秒） | 可忽略 |
 | 应用线程 | JoltVM 不修改 | 不主动性能分析时零影响 |
 
 ---
@@ -730,6 +868,8 @@ base64url(username:role:expirationEpochSeconds).base64url(HMAC-SHA256-signature)
 | 前端 | 原生 HTML + CSS + JS | 零构建依赖，嵌入 Agent JAR |
 | 代码编辑器 | Monaco Editor (CDN) | VS Code 的编辑器组件，按需加载 |
 | 火焰图 | d3-flame-graph (CDN) | 交互式、可缩放的火焰图 |
+| OGNL | ognl:ognl 3.4.x | 运行时表达式执行（与 Arthas 相同） |
+| async-profiler | 基于反射 | CPU/分配/锁分析，无编译时依赖 |
 
 ---
 
@@ -906,7 +1046,17 @@ joltvm/
 | **Phase 5** | Spring Boot 感知 | Spring `ApplicationContext`、`RequestMappingHandlerMapping` | ✅ 已完成 |
 | **Phase 6** | Web UI | 原生 JS、Monaco Editor (CDN)、d3-flame-graph (CDN) | ✅ 已完成 |
 | **Phase 7** | 安全审计（RBAC + 令牌认证 + 审计日志 + 导出） | HMAC-SHA256、`ConcurrentHashMap`、JSON Lines | ✅ 已完成 |
+| **Phase 8** | 安全加固（PBKDF2、Bug 修复、线程安全） | PBKDF2WithHmacSHA256、AtomicInteger | ✅ 已完成 |
+| **Phase 9** | 线程诊断（列表、CPU Top-N、死锁检测、Dump） | `ThreadMXBean` | ✅ 已完成 |
+| **Phase 10** | JVM 仪表盘（GC 统计、系统属性、Classpath） | `GarbageCollectorMXBean` | ✅ 已完成 |
+| **Phase 11** | ClassLoader 分析 + Logger 动态调级 | `Instrumentation.getAllLoadedClasses()`、反射 | ✅ 已完成 |
+| **Phase 12** | OGNL 表达式引擎（安全沙箱） | OGNL 3.4.x、四层纵深防御 | ✅ 已完成 |
+| **Phase 13** | Watch 命令（条件方法观察） | Byte Buddy Advice、OGNL 过滤器 | ✅ 已完成 |
+| **Phase 14** | async-profiler 集成（CPU/分配/锁） | 基于反射、collapsed stacks → d3-flamegraph | ✅ 已完成 |
+| **Phase 15** | WebSocket 实时推送 | `WebSocketServerProtocolHandler`、发布/订阅频道 | ✅ 已完成 |
+| **Phase 16** | Plugin/SPI 扩展机制 | `ServiceLoader`、`URLClassLoader` 隔离 | ✅ 已完成 |
+| **Phase 17** | Tunnel Server 远程诊断 → v1.0.0 正式发布 | 出站 WS、反向代理、`CompletableFuture` 关联 | ✅ 已完成 |
 
 ---
 
-*最后更新：2026-04-14*
+*最后更新：2026-04-21*

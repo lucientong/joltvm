@@ -12,6 +12,7 @@ This document provides a deep dive into JoltVM's architecture, module design, an
   - [joltvm-server](#joltvm-server)
   - [joltvm-cli](#joltvm-cli)
   - [joltvm-ui](#joltvm-ui)
+  - [joltvm-tunnel](#joltvm-tunnel)
 - [Core Mechanisms](#core-mechanisms)
   - [Java Instrumentation API](#java-instrumentation-api)
   - [Agent Loading Modes](#agent-loading-modes)
@@ -21,6 +22,11 @@ This document provides a deep dive into JoltVM's architecture, module design, an
   - [Method Tracing & Flame Graph](#method-tracing--flame-graph)
   - [Spring Boot Awareness](#spring-boot-awareness)
   - [Embedded Web UI](#embedded-web-ui)
+  - [OGNL Expression Engine](#ognl-expression-engine)
+  - [Watch Command](#watch-command)
+  - [WebSocket Real-time Push](#websocket-real-time-push)
+  - [Plugin/SPI Extension](#pluginspi-extension)
+  - [Tunnel Remote Diagnostics](#tunnel-remote-diagnostics)
 - [Data Flow](#data-flow)
 - [Thread Model](#thread-model)
 - [Security Model](#security-model)
@@ -151,7 +157,7 @@ The embedded HTTP server module, based on Netty 4.x, that runs inside the target
 | `HttpDispatcherHandler` | Netty `SimpleChannelInboundHandler` that dispatches requests to `RouteHandler` via `HttpRouter`. Handles CORS preflight (OPTIONS), token-based authentication and RBAC enforcement, static file fallback, and error handling. |
 | `StaticFileHandler` | Serves embedded Web UI static files from classpath `webui/` directory. Resolves MIME types for 18+ file extensions, prevents path traversal attacks, and sets cache control headers. |
 | `HttpResponseHelper` | Utility class for building JSON, text, and error responses with proper Content-Type and CORS headers. |
-| `APIRoutes` | Registers all API endpoints on the router during initialization. Manages 21 routes including security/audit endpoints. |
+| `APIRoutes` | Registers all API endpoints on the router during initialization. Manages 46+ routes including security/audit, thread diagnostics, JVM info, classloader, logger, OGNL, watch, profiler, WebSocket, and plugin endpoints. |
 | `HealthHandler` | `GET /api/health` — Returns JVM status, PID, uptime, and memory info. |
 | `ClassListHandler` | `GET /api/classes` — Paginated listing of loaded classes with package/search filters. |
 | `ClassDetailHandler` | `GET /api/classes/{className}` — Detailed class info (fields, methods, modifiers). |
@@ -206,12 +212,37 @@ The embedded HTTP server module, based on Netty 4.x, that runs inside the target
 | POST | `/api/auth/login` | Authenticate and get token |
 | GET | `/api/auth/status` | Current authentication status |
 | GET | `/api/audit/export` | Export audit logs (JSON Lines or CSV) |
+| GET | `/api/threads` | List all threads (filterable by state) |
+| GET | `/api/threads/top` | Top-N CPU-consuming threads |
+| GET | `/api/threads/{id}` | Thread detail with stack trace |
+| GET | `/api/threads/deadlocks` | Deadlock detection |
+| GET | `/api/threads/dump` | Plain-text thread dump (jstack format) |
+| GET | `/api/jvm/gc` | GC statistics per collector |
+| GET | `/api/jvm/sysprops` | System properties (sensitive values redacted) |
+| GET | `/api/jvm/sysenv` | Environment variables (sensitive values redacted) |
+| GET | `/api/jvm/classpath` | Runtime classpath entries |
+| GET | `/api/classloaders` | ClassLoader hierarchy tree |
+| GET | `/api/classloaders/{id}/classes` | Classes loaded by a specific ClassLoader |
+| GET | `/api/classloaders/conflicts` | Class conflict detection |
+| GET | `/api/loggers` | List all loggers with levels |
+| PUT | `/api/loggers/{name}` | Change logger level at runtime |
+| POST | `/api/ognl/eval` | Evaluate OGNL expression (sandboxed) |
+| POST | `/api/watch/start` | Start a method watch session |
+| POST | `/api/watch/{id}/stop` | Stop a watch session |
+| GET | `/api/watch/{id}/records` | Fetch watch records |
+| GET | `/api/watch` | List active watch sessions |
+| DELETE | `/api/watch/{id}` | Delete a watch session |
+| GET | `/api/profiler/async/status` | async-profiler availability |
+| POST | `/api/profiler/async/start` | Start async-profiler session |
+| POST | `/api/profiler/async/stop` | Stop async-profiler session |
+| GET | `/api/profiler/async/flamegraph/{id}` | Flame graph data for profiler session |
+| GET | `/api/plugins` | List loaded plugins |
 
 **Design considerations**:
 - Netty is chosen for its minimal footprint and zero external dependencies
 - Runs on a dedicated thread pool to avoid interfering with the application
 - Agent loads server via reflection (`Class.forName`) to avoid circular compile-time dependency
-- WebSocket support planned for real-time log streaming and live method tracing (future enhancement)
+- WebSocket support at `/ws` enables real-time data push for threads, GC, and memory metrics
 - API endpoints follow a RESTful convention under `/api/`
 - Static file serving via `StaticFileHandler` provides an embedded Web UI without a separate frontend server
 
@@ -262,6 +293,68 @@ Browser → GET / → HttpDispatcherHandler
 - **SPA-style routing**: `HttpDispatcherHandler` falls back to `StaticFileHandler` when no API route matches a GET request
 - **Path traversal protection**: `StaticFileHandler` blocks `..` and `\` in requested paths
 - **XSS prevention**: All user-generated content is escaped via the `esc()` utility function before DOM insertion
+
+### joltvm-tunnel
+
+*(Phase 17 — Implemented as standalone server)*
+
+A standalone tunnel server that enables remote JVM diagnostics without direct network access. The agent initiates an outbound WebSocket connection to the tunnel server; users access remote agents through the tunnel's HTTP reverse proxy.
+
+#### Architecture
+
+```
+                           ┌─── User Browser ─────────┐
+                           │  Tunnel Dashboard        │
+                           │  or JoltVM Web IDE       │
+                           │  (via proxy)             │
+                           └──────────┬───────────────┘
+                                      │ HTTP
+                           ┌──────────┴───────────────┐
+                           │  joltvm-tunnel (:8800)    │
+                           │                           │
+                           │  /api/tunnel/agents       │
+                           │  /api/tunnel/agents/{id}  │
+                           │    /proxy/**  ──────────┐ │
+                           │                         │ │
+                           │  /ws/agent ◄────────┐   │ │
+                           │                     │   │ │
+                           │  AgentRegistry      │   │ │
+                           │  RequestCorrelator   │   │ │
+                           └─────────────────────┼───┼─┘
+                                                 │   │
+                        ┌───── WebSocket ─────────┘   │
+                        │    (outbound from agent)    │
+                        │                              │
+               ┌────────┴───────────┐     ┌───────────┘
+               │  Target JVM (behind│     │ HTTP proxied
+               │  firewall)         │◄────┘ via WS tunnel
+               │                    │
+               │  joltvm-agent      │
+               │  + TunnelClient    │
+               │  + JoltVM Server   │
+               └────────────────────┘
+```
+
+#### Key Classes
+
+| Class | Responsibility |
+|-------|---------------|
+| `TunnelProtocol` | Shared JSON-based WebSocket protocol: `register`, `registered`, `heartbeat`, `heartbeat_ack`, `request`, `response`, `error`. |
+| `AgentRegistry` | Thread-safe registry of connected agents. Pre-shared token validation, heartbeat tracking, channel-to-agent reverse index. |
+| `RequestCorrelator` | Async request/response correlation via `CompletableFuture`. Auto-timeout (30s), bulk cancellation on disconnect. |
+| `TunnelServer` | Standalone Netty server. Dual pipeline: WebSocket at `/ws/agent` + HTTP for REST API and dashboard. |
+| `AgentWebSocketHandler` | Processes agent registration, heartbeats, and proxied responses. |
+| `TunnelHttpHandler` | HTTP handler for tunnel REST API and dashboard static files. Reverse-proxies requests to agents via WebSocket. |
+| `TunnelClient` (in joltvm-server) | Agent-side outbound WebSocket client. Auto-reconnect (1s→30s exponential backoff), heartbeat (30s), proxied request forwarding to local JoltVM server. |
+
+#### Tunnel REST API
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/tunnel/health` | Tunnel server health (version, agent count, pending requests) |
+| GET | `/api/tunnel/agents` | List connected agents with metadata |
+| GET | `/api/tunnel/agents/{id}` | Agent detail (metadata, status, remote address) |
+| * | `/api/tunnel/agents/{id}/proxy/**` | Reverse proxy — forwards to agent's local JoltVM server |
 
 ---
 
@@ -605,6 +698,49 @@ HTTP GET request
 - **Classpath loading**: Reads files from `webui/` base directory via `ClassLoader.getResourceAsStream()`
 - **Default document**: Requests to `/` are automatically served as `index.html`
 
+### OGNL Expression Engine
+
+*(Phase 13 — Implemented)*
+
+JoltVM provides a secure OGNL expression evaluation engine for inspecting runtime objects. Four-layer defense-in-depth security:
+
+1. **Pre-parse validation** — Regex-based expression scanning before OGNL parsing
+2. **MemberAccess sandbox** (`SafeOgnlMemberAccess`) — 60+ blocked classes (Runtime, ProcessBuilder, Unsafe, ClassLoader, File, Network, etc.), 25+ blocked methods, 12+ blocked package prefixes, class hierarchy traversal
+3. **Execution timeout** — 5-second timeout via `Future.get(5, SECONDS)` in a dedicated thread
+4. **Result depth limiting** (`ResultSerializer`) — Identity-based circular reference detection, depth limit (default 5, max 10), collection size limit (200)
+
+### Watch Command
+
+*(Phase 14 — Implemented)*
+
+Multiple concurrent method observation sessions (max 10). Each `WatchSession` owns its own Byte Buddy `ResettableClassFileTransformer`. OGNL context variables: `#args`, `#returnObj`, `#throwExp`, `#cost`, `#target`, `#clazz`. Sessions auto-expire after configurable duration (default 60s, max 5min).
+
+### WebSocket Real-time Push
+
+*(Phase 16 — Implemented)*
+
+Netty pipeline includes `WebSocketServerProtocolHandler` at `/ws`. JSON-based pub/sub protocol with channels: `threads.top` (5s), `gc.stats` (10s), `jvm.memory` (5s). `SubscriptionManager` manages per-channel subscriptions with periodic data push. Client-side `websocket.js` provides auto-reconnect with exponential backoff and REST fallback.
+
+### Plugin/SPI Extension
+
+*(Phase 17 — Implemented)*
+
+`JoltVMPlugin` SPI interface loaded via `ServiceLoader` from `plugins/` directory. Each plugin JAR gets its own `URLClassLoader` for isolation. Plugins can contribute REST routes (auto-prefixed `/api/plugins/{id}/`) and web assets. `PluginLifecycleManager` handles discovery, ID validation, route registration, and lifecycle management.
+
+### Tunnel Remote Diagnostics
+
+*(Phase 17 — Implemented)*
+
+See [joltvm-tunnel](#joltvm-tunnel) module above. The tunnel enables diagnosing JVMs behind firewalls or in Kubernetes pods without opening inbound ports.
+
+```
+Agent → TunnelClient → outbound WS → TunnelServer → AgentRegistry
+                                              ↕
+User → HTTP request → TunnelHttpHandler → RequestCorrelator → WS frame → Agent
+                                              ↕
+Agent → WS response → RequestCorrelator.complete() → HTTP response → User
+```
+
 ---
 
 ## Data Flow
@@ -644,6 +780,9 @@ JoltVM is designed to minimize impact on the target application:
 | Netty boss group (1 thread) | Accept incoming HTTP/WS connections | Negligible |
 | Netty worker group (2 threads) | Handle HTTP requests and WebSocket frames | Low — only active during diagnostics |
 | Profiler sampling thread | Periodic stack sampling for flame graphs | Configurable sampling interval |
+| WebSocket push scheduler (1 thread) | Periodic data push to WebSocket subscribers | Low — daemon thread, 5-10s intervals |
+| Tunnel client I/O (1 thread) | Outbound WebSocket to tunnel server | Negligible — only when tunnel is configured |
+| Tunnel heartbeat scheduler | Periodic heartbeat to tunnel server (30s) | Negligible |
 | Application threads | Not modified by JoltVM | Zero impact when not actively profiling |
 
 ---
@@ -733,6 +872,8 @@ Security can be completely disabled via `SecurityConfig.setEnabled(false)`. When
 | Frontend | Vanilla HTML + CSS + JS | Zero build dependency, embedded in agent JAR |
 | Code editor | Monaco Editor (CDN) | VS Code's editor component, loaded on-demand |
 | Flame graph | d3-flame-graph (CDN) | Interactive, zoomable flame graphs |
+| OGNL | ognl:ognl 3.4.x | Runtime expression evaluation (same as Arthas) |
+| async-profiler | Reflection-based | CPU/Alloc/Lock profiling, no compile-time dep |
 
 ---
 
@@ -903,7 +1044,17 @@ joltvm/
 | **Phase 5** | Spring Boot awareness | Spring `ApplicationContext`, `RequestMappingHandlerMapping` | ✅ Complete |
 | **Phase 6** | Web UI | Vanilla JS, Monaco Editor (CDN), d3-flame-graph (CDN) | ✅ Complete |
 | **Phase 7** | Security & Audit (RBAC + token auth + audit log + export) | HMAC-SHA256, `ConcurrentHashMap`, JSON Lines | ✅ Complete |
+| **Phase 8** | Security hardening (PBKDF2, bug fixes, thread safety) | PBKDF2WithHmacSHA256, AtomicInteger | ✅ Complete |
+| **Phase 9** | Thread diagnostics (list, CPU top-N, deadlock, dump) | `ThreadMXBean` | ✅ Complete |
+| **Phase 10** | JVM dashboard (GC stats, system properties, classpath) | `GarbageCollectorMXBean` | ✅ Complete |
+| **Phase 11** | ClassLoader analysis + Logger dynamic level | `Instrumentation.getAllLoadedClasses()`, reflection | ✅ Complete |
+| **Phase 12** | OGNL expression engine (secure sandbox) | OGNL 3.4.x, 4-layer defense-in-depth | ✅ Complete |
+| **Phase 13** | Watch command (conditional method observation) | Byte Buddy Advice, OGNL filters | ✅ Complete |
+| **Phase 14** | async-profiler integration (CPU/Alloc/Lock) | Reflection-based, collapsed stacks → d3-flamegraph | ✅ Complete |
+| **Phase 15** | WebSocket real-time push | `WebSocketServerProtocolHandler`, pub/sub channels | ✅ Complete |
+| **Phase 16** | Plugin/SPI extension mechanism | `ServiceLoader`, `URLClassLoader` isolation | ✅ Complete |
+| **Phase 17** | Tunnel server for remote diagnostics → v1.0.0 GA | Outbound WS, reverse proxy, `CompletableFuture` correlation | ✅ Complete |
 
 ---
 
-*Last updated: 2026-04-14*
+*Last updated: 2026-04-21*

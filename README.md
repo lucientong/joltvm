@@ -18,7 +18,7 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ## ✨ Features
 
-> JoltVM is under active development. Phase 1 through Phase 16 are complete. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 through Phase 17 are complete — v1.0.0 GA is released! See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, interactive flame graphs (d3-flame-graph), class/method tree navigation, Spring Boot bean browser, and audit dashboard. Edit code and apply hot-fixes visually — all served from the embedded Netty server at `http://localhost:7758`.
@@ -43,6 +43,9 @@ Evaluate OGNL expressions against the running JVM in a secure sandbox. Four-laye
 
 ### 🔒 Security & Audit
 HMAC-SHA256 token-based authentication with three-tier RBAC (Viewer / Operator / Admin). Authentication middleware enforces permissions on every API request. Every hot-fix generates an audit entry with timestamp, operator, reason, and diff. Immutable audit logs with JSON Lines and CSV export. Passwords secured with PBKDF2-SHA256 (310,000 iterations). Security can be disabled for development use.
+
+### 🌐 Remote Diagnostics (Tunnel)
+Diagnose JVMs behind firewalls without opening inbound ports. The agent initiates an outbound WebSocket connection to a standalone tunnel server. Users access remote agents through the tunnel's HTTP API and built-in dashboard. Pre-shared tokens for agent registration. TLS supported for encrypted communication.
 
 ### 🧵 Thread Diagnostics
 List all JVM threads with state, CPU time, and lock info. Identify top-N CPU-consuming threads via two-sample delta analysis. Detect deadlocks (object monitor and ownable synchronizer). Export jstack-compatible thread dumps. All accessible from the browser-based Threads tab with color-coded state badges and click-to-view stack traces.
@@ -90,6 +93,9 @@ java -javaagent:joltvm-agent/build/libs/joltvm-agent-*-all.jar=port=7758,securit
 | `auditFile`     | `$TMPDIR/joltvm-audit.jsonl`        | Path for the persistent JSON Lines audit log               |
 | `tlsCert`       | *(none)*                            | Path to TLS certificate (PEM) — enables HTTPS when set    |
 | `tlsKey`        | *(none)*                            | Path to TLS private key (PEM) — required when `tlsCert` is set |
+| `tunnelServer`  | *(none)*                            | Tunnel server WebSocket URL (e.g., `wss://tunnel.example.com:8800/ws/agent`) — enables remote diagnostics |
+| `tunnelToken`   | *(empty)*                           | Pre-shared registration token for the tunnel server |
+| `tunnelAgentId` | `{hostname}-{pid}`                  | Custom agent identifier for the tunnel server |
 
 ---
 
@@ -131,6 +137,7 @@ JoltVM consists of four modules (see [Architecture Doc](docs/en/architecture.md)
 | `joltvm-server` | Embedded Netty HTTP server with REST APIs (class list, detail, decompile, hot-swap, tracing, Spring awareness, security & audit) + Web UI | ✅ Phase 2–7 |
 | `joltvm-cli` | Command-line tool for attaching agent to running JVM processes | ✅ Phase 1 |
 | `joltvm-ui` | Browser-based Web IDE (embedded in joltvm-server) | ✅ Phase 6 |
+| `joltvm-tunnel` | Standalone tunnel server for remote JVM diagnostics via reverse proxy | ✅ Phase 17 |
 
 ---
 
@@ -142,13 +149,13 @@ JoltVM consists of four modules (see [Architecture Doc](docs/en/architecture.md)
 <dependency>
     <groupId>io.github.lucientong</groupId>
     <artifactId>joltvm-agent</artifactId>
-    <version>0.7.0</version>
+    <version>1.0.0</version>
 </dependency>
 ```
 
 ```kotlin
 // Gradle Kotlin DSL
-implementation("io.github.lucientong:joltvm-agent:0.7.0")
+implementation("io.github.lucientong:joltvm-agent:1.0.0")
 ```
 
 ---
@@ -192,6 +199,37 @@ CMD ["java", "-javaagent:/opt/joltvm/joltvm-agent.jar", "-jar", "your-app.jar"]
 
 ---
 
+## 🌐 Tunnel Server (Remote Diagnostics)
+
+The tunnel server enables diagnosing JVMs behind firewalls or in Kubernetes pods without opening inbound ports. The agent initiates an outbound WebSocket connection to the tunnel server.
+
+### Run the Tunnel Server
+
+```bash
+# Start tunnel server on default port 8800
+java -jar joltvm-tunnel/build/libs/joltvm-tunnel-*-all.jar
+
+# With registration tokens (recommended for production)
+java -jar joltvm-tunnel/build/libs/joltvm-tunnel-*-all.jar --token=SECRET1 --token=SECRET2
+
+# With TLS
+java -jar joltvm-tunnel/build/libs/joltvm-tunnel-*-all.jar --tls-cert=cert.pem --tls-key=key.pem
+```
+
+### Connect an Agent to the Tunnel
+
+```bash
+java -javaagent:joltvm-agent.jar=tunnelServer=ws://tunnel-server:8800/ws/agent,tunnelToken=SECRET1 -jar your-app.jar
+```
+
+### Access Remote Agents
+
+- **Dashboard**: `http://tunnel-server:8800/`
+- **Agent list**: `GET http://tunnel-server:8800/api/tunnel/agents`
+- **Proxy to agent**: `GET http://tunnel-server:8800/api/tunnel/agents/{agentId}/proxy/api/health`
+
+---
+
 ## 🗺️ Roadmap
 
 - [x] **Phase 1**: Agent skeleton (premain/agentmain) + Attach API + CLI
@@ -210,7 +248,7 @@ CMD ["java", "-javaagent:/opt/joltvm/joltvm-agent.jar", "-jar", "your-app.jar"]
 - [x] **Phase 14**: async-profiler integration (CPU/Alloc/Lock profiling)
 - [x] **Phase 15**: WebSocket real-time push
 - [x] **Phase 16**: Plugin/SPI extension mechanism
-- [ ] **Phase 17**: Tunnel server for remote diagnostics → v1.0.0 GA
+- [x] **Phase 17**: Tunnel server for remote diagnostics → v1.0.0 GA
 
 ---
 

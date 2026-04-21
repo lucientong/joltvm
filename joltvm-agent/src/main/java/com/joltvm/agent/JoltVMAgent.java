@@ -62,6 +62,9 @@ public final class JoltVMAgent {
     /** Holds the server instance (via reflection to avoid compile-time circular dependency). */
     private static Object server;
 
+    /** Holds the tunnel client instance (via reflection). */
+    private static Object tunnelClient;
+
     private JoltVMAgent() {
         // Utility class — no instantiation
     }
@@ -218,6 +221,9 @@ public final class JoltVMAgent {
             LOG.info(String.format("JoltVM Web IDE: http://localhost:%d", port));
             LOG.info(String.format("JoltVM Health:  http://localhost:%d/api/health", port));
 
+            // Start tunnel client if tunnelServer is configured
+            startTunnelClient(port, agentArgs);
+
         } catch (ClassNotFoundException e) {
             LOG.info("JoltVM server module not found on classpath, skipping HTTP server startup");
         } catch (Exception e) {
@@ -237,6 +243,43 @@ public final class JoltVMAgent {
                 LOG.log(Level.WARNING, "Error stopping JoltVM server during reset", e);
             }
             server = null;
+        }
+        if (tunnelClient != null) {
+            try {
+                Method stopMethod = tunnelClient.getClass().getMethod("stop");
+                stopMethod.invoke(tunnelClient);
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Error stopping tunnel client during reset", e);
+            }
+            tunnelClient = null;
+        }
+    }
+
+    /**
+     * Starts the tunnel client if the tunnelServer agent argument is configured.
+     *
+     * @param localPort the local JoltVM server port
+     * @param agentArgs parsed agent arguments
+     */
+    private static void startTunnelClient(int localPort, Map<String, String> agentArgs) {
+        String tunnelServerUrl = agentArgs.get("tunnelServer");
+        if (tunnelServerUrl == null || tunnelServerUrl.isBlank()) {
+            return;
+        }
+
+        try {
+            Class<?> tunnelClientClass = Class.forName("com.joltvm.server.tunnel.TunnelClient");
+            Method fromAgentArgs = tunnelClientClass.getMethod("fromAgentArgs", Map.class, int.class);
+            tunnelClient = fromAgentArgs.invoke(null, agentArgs, localPort);
+            if (tunnelClient != null) {
+                Method startMethod = tunnelClientClass.getMethod("start");
+                startMethod.invoke(tunnelClient);
+                LOG.info("Tunnel client started, connecting to: " + tunnelServerUrl);
+            }
+        } catch (ClassNotFoundException e) {
+            LOG.info("Tunnel client class not found on classpath, skipping tunnel connection");
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to start tunnel client", e);
         }
     }
 

@@ -19,3 +19,4 @@ rootProject.name = "joltvm"
 include("joltvm-agent")
 include("joltvm-server")
 include("joltvm-cli")
+include("joltvm-tunnel")
