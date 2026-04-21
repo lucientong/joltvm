@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JoltVM Tunnel Dashboard</title>
+    <style>
+        :root {
+            --bg-primary: #1e1e2e;
+            --bg-secondary: #313244;
+            --bg-tertiary: #45475a;
+            --text-primary: #cdd6f4;
+            --text-secondary: #a6adc8;
+            --accent: #89b4fa;
+            --accent-hover: #74c7ec;
+            --green: #a6e3a1;
+            --red: #f38ba8;
+            --yellow: #f9e2af;
+            --border: #585b70;
+            --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 {
+            font-size: 1.4em;
+            color: var(--accent);
+        }
+        .header .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9em;
+            color: var(--text-secondary);
+        }
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            display: inline-block;
+        }
+        .container { padding: 24px; max-width: 1200px; margin: 0 auto; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .stat-card .label { color: var(--text-secondary); font-size: 0.85em; }
+        .stat-card .value { font-size: 2em; font-weight: 600; color: var(--accent); margin-top: 4px; }
+        .agents-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+        .agents-table th {
+            background: var(--bg-tertiary);
+            padding: 12px 16px;
+            text-align: left;
+            font-size: 0.85em;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .agents-table td {
+            padding: 12px 16px;
+            border-top: 1px solid var(--border);
+            font-family: var(--font-mono);
+            font-size: 0.9em;
+        }
+        .agents-table tr:hover { background: var(--bg-tertiary); }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        .badge-connected { background: rgba(166,227,161,0.2); color: var(--green); }
+        .badge-disconnected { background: rgba(243,139,168,0.2); color: var(--red); }
+        .btn {
+            background: var(--accent);
+            color: var(--bg-primary);
+            border: none;
+            padding: 6px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        .btn:hover { background: var(--accent-hover); }
+        .empty {
+            text-align: center;
+            padding: 48px;
+            color: var(--text-secondary);
+        }
+        .refresh-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .refresh-bar h2 { font-size: 1.2em; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>JoltVM Tunnel Dashboard</h1>
+        <div class="status">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Loading...</span>
+        </div>
+    </div>
+    <div class="container">
+        <div class="stats">
+            <div class="stat-card">
+                <div class="label">Connected Agents</div>
+                <div class="value" id="agentCount">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Pending Requests</div>
+                <div class="value" id="pendingRequests">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Server Version</div>
+                <div class="value" id="serverVersion" style="font-size:1.2em">-</div>
+            </div>
+        </div>
+        <div class="refresh-bar">
+            <h2>Agents</h2>
+            <button class="btn" onclick="refresh()">Refresh</button>
+        </div>
+        <table class="agents-table">
+            <thead>
+                <tr>
+                    <th>Agent ID</th>
+                    <th>Hostname</th>
+                    <th>PID</th>
+                    <th>Java</th>
+                    <th>OS</th>
+                    <th>Status</th>
+                    <th>Connected At</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="agentsBody">
+                <tr><td colspan="8" class="empty">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <script>
+        const BASE = window.location.origin;
+
+        async function fetchHealth() {
+            try {
+                const res = await fetch(`${BASE}/api/tunnel/health`);
+                const data = await res.json();
+                document.getElementById('agentCount').textContent = data.agents || 0;
+                document.getElementById('pendingRequests').textContent = data.pendingRequests || 0;
+                document.getElementById('serverVersion').textContent = data.version || '-';
+                document.getElementById('statusDot').style.background = 'var(--green)';
+                document.getElementById('statusText').textContent = 'Connected';
+            } catch (e) {
+                document.getElementById('statusDot').style.background = 'var(--red)';
+                document.getElementById('statusText').textContent = 'Disconnected';
+            }
+        }
+
+        async function fetchAgents() {
+            try {
+                const res = await fetch(`${BASE}/api/tunnel/agents`);
+                const data = await res.json();
+                const tbody = document.getElementById('agentsBody');
+                if (!data.agents || data.agents.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" class="empty">No agents connected</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.agents.map(a => `
+                    <tr>
+                        <td>${esc(a.agentId)}</td>
+                        <td>${esc(a.metadata?.hostname || '-')}</td>
+                        <td>${esc(a.metadata?.pid || '-')}</td>
+                        <td>${esc(a.metadata?.javaVersion || '-')}</td>
+                        <td>${esc(a.metadata?.os || '-')}</td>
+                        <td><span class="badge ${a.connected ? 'badge-connected' : 'badge-disconnected'}">
+                            ${a.connected ? 'Connected' : 'Disconnected'}</span></td>
+                        <td>${formatTime(a.connectedAt)}</td>
+                        <td><button class="btn" onclick="openAgent('${esc(a.agentId)}')">Open</button></td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                document.getElementById('agentsBody').innerHTML =
+                    '<tr><td colspan="8" class="empty">Failed to load agents</td></tr>';
+            }
+        }
+
+        function openAgent(agentId) {
+            // Open the agent's proxied JoltVM Web IDE
+            const proxyBase = `${BASE}/api/tunnel/agents/${agentId}/proxy`;
+            window.open(`${proxyBase}/`, '_blank');
+        }
+
+        function esc(s) {
+            const div = document.createElement('div');
+            div.textContent = s || '';
+            return div.innerHTML;
+        }
+
+        function formatTime(ts) {
+            if (!ts) return '-';
+            return new Date(ts).toLocaleString();
+        }
+
+        function refresh() {
+            fetchHealth();
+            fetchAgents();
+        }
+
+        // Initial load + auto-refresh every 5s
+        refresh();
+        setInterval(refresh, 5000);
+    </script>
+</body>
+</html>
