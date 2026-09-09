@@ -18,7 +18,7 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ## ✨ Features
 
-> JoltVM is under active development. Phase 1 through Phase 17 are complete; v1.2.0 makes network binding secure by default and adds published-artifact smoke gates. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 through Phase 17 are complete; v1.2.1 makes network binding secure by default and adds published-artifact smoke gates. See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, interactive flame graphs (d3-flame-graph), class/method tree navigation, Spring Boot bean browser, and audit dashboard. Edit code and apply hot-fixes visually — all served from the embedded Netty server at `http://localhost:7758`.
@@ -161,7 +161,7 @@ The primary artifact is the thin Agent API library (do not pass this JAR to
 <dependency>
     <groupId>io.github.lucientong</groupId>
     <artifactId>joltvm-agent</artifactId>
-    <version>1.2.0</version>
+    <version>1.2.1</version>
 </dependency>
 ```
 
@@ -170,7 +170,7 @@ it without adding the fat JAR to your application classpath:
 
 ```bash
 mvn dependency:copy \
-  -Dartifact=io.github.lucientong:joltvm-agent:1.2.0:jar:all \
+  -Dartifact=io.github.lucientong:joltvm-agent:1.2.1:jar:all \
   -DoutputDirectory=.
 ```
 

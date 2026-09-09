@@ -18,7 +18,7 @@ JoltVM 是一个 JVM 在线诊断与热修复框架。通过 Java Agent 附着�
 
 ## ✨ 功能特性
 
-> JoltVM 正在积极开发中。Phase 1 至 Phase 17 已完成；v1.2.0 默认采用安全网络绑定，并增加真实发布物 smoke 门禁。完整计划参见[路线图](#-路线图)。
+> JoltVM 正在积极开发中。Phase 1 至 Phase 17 已完成；v1.2.1 默认采用安全网络绑定，并增加真实发布物 smoke 门禁。完整计划参见[路线图](#-路线图)。
 
 ### 🖥️ 浏览器端 Web IDE
 不再需要记忆 50+ 条命令。可视化界面集成 Monaco Editor 代码编辑器、实时日志流、类和方法树导航。在线编辑代码并直接热修复。
@@ -148,7 +148,7 @@ JoltVM 由以下模块组成（详见[架构文档](docs/zh/architecture.md)）�
 <dependency>
     <groupId>io.github.lucientong</groupId>
     <artifactId>joltvm-agent</artifactId>
-    <version>1.2.0</version>
+    <version>1.2.1</version>
 </dependency>
 ```
 
@@ -157,7 +157,7 @@ JoltVM 由以下模块组成（详见[架构文档](docs/zh/architecture.md)）�
 
 ```bash
 mvn dependency:copy \
-  -Dartifact=io.github.lucientong:joltvm-agent:1.2.0:jar:all \
+  -Dartifact=io.github.lucientong:joltvm-agent:1.2.1:jar:all \
   -DoutputDirectory=.
 ```
 

@@ -31,18 +31,35 @@ dependencies {
     implementation("com.google.code.gson:gson:${property("gsonVersion")}")
 }
 
-// Keep the thin JAR as the primary Maven artifact for API consumers, and publish
-// the canonical runnable distribution under the conventional "all" classifier.
-// The distribution project is evaluated later, so wire its Shadow task after all
-// project build scripts have been configured.
+// Stage the distribution JAR under this project's build directory before
+// publishing. Signing an artifact in joltvm-distribution/build/libs directly
+// would make the agent and distribution Sign tasks claim the same .asc output.
+val fatAgentPublicationDir = layout.buildDirectory.dir("publication/fat-agent")
+val fatAgentPublicationJar = fatAgentPublicationDir.map {
+    it.file("joltvm-agent-${project.version}-all.jar")
+}
+val prepareFatAgentPublication by tasks.registering(Copy::class) {
+    dependsOn(":joltvm-distribution:shadowJar")
+    from(project(":joltvm-distribution").tasks.named("shadowJar").map { it.outputs.files })
+    into(fatAgentPublicationDir)
+}
+
+// Keep the thin JAR as the primary Maven artifact for API consumers, and
+// publish the staged canonical distribution under the "all" classifier.
 gradle.projectsEvaluated {
     publishing {
         publications.named<MavenPublication>("mavenJava") {
-            artifact(project(":joltvm-distribution").tasks.named("shadowJar")) {
+            artifact(fatAgentPublicationJar) {
                 classifier = "all"
+                extension = "jar"
+                builtBy(prepareFatAgentPublication)
             }
         }
     }
+}
+
+tasks.matching { it.name == "signMavenJavaPublication" }.configureEach {
+    dependsOn(prepareFatAgentPublication)
 }
 
 tasks.jar {
