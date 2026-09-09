@@ -530,7 +530,7 @@ JoltVM 提供两种互补的性能分析机制：**方法追踪**（Byte Buddy A
 #### 方法追踪（Byte Buddy Advice）
 
 ```
-POST /api/trace/start  { "type": "trace", "className": "com.example.MyService", "methodName": "process" }
+POST /api/trace/start  { "type": "trace", "className": "com.example.MyService", "methodName": "process", "minDurationMs": 10 }
         │
         ▼
 ┌─────────────────────────┐
@@ -563,6 +563,8 @@ POST /api/trace/start  { "type": "trace", "className": "com.example.MyService", 
 - **静态 `activeCollector` 字段**：Byte Buddy Advice 类必须是静态的；通过 `volatile` 静态引用将 Advice 回调桥接到服务的 `FlameGraphCollector` 实例
 - **`Assigner.Typing.DYNAMIC`**：`@Advice.Return` 注解需要此设置来处理所有被 instrument 方法的动态返回类型
 - **`ConcurrentHashMap.newKeySet()`**：跟踪当前正在被追踪的类，确保停止/清理操作的幂等性
+- **最小耗时过滤**：`minDurationMs` 默认 0、范围 0–60000 ms。Advice 在计算耗时后、参数/返回值字符串化前丢弃过快调用，降低高频方法的采集开销
+- **相对深度语义**：`TraceRecord.depth` 只统计当前 trace 已插桩方法的嵌套层级，不代表完整 JVM 调用链。完整调用栈应使用栈采样或 async-profiler
 
 #### 栈采样
 
@@ -700,10 +702,10 @@ HTTP GET 请求
 
 *（Phase 13 — 已实现）*
 
-JoltVM 提供安全的 OGNL 表达式引擎，用于运行时对象检查。四层纵深防御安全机制：
+JoltVM 提供面向显式诊断上下文的只读 OGNL 表达式引擎。四层纵深防御安全机制：
 
-1. **预解析验证** — 基于正则的表达式扫描（OGNL 解析前）
-2. **MemberAccess 沙箱**（`SafeOgnlMemberAccess`）— 60+ 个被阻止的类（Runtime、ProcessBuilder、Unsafe、ClassLoader、File、Network 等）、25+ 个被阻止的方法、12+ 个被阻止的包前缀，含类继承链遍历
+1. **默认拒绝语法** — OGNL 解析前拒绝全部静态类访问、对象构造、赋值和内部上下文访问
+2. **MemberAccess 白名单**（`SafeOgnlMemberAccess`）— 只允许标量、只读集合操作和 `RuntimeInfo` 显式方法；任意业务对象成员默认不可访问，并保留危险类/包/方法硬拒绝作为纵深防御
 3. **执行超时** — 通过 `Future.get(5, SECONDS)` 在专用线程中实现 5 秒超时
 4. **结果深度限制**（`ResultSerializer`）— 基于 identity 的循环引用检测、深度限制（默认 5，最大 10）、集合大小限制（200）
 
@@ -711,7 +713,7 @@ JoltVM 提供安全的 OGNL 表达式引擎，用于运行时对象检查。四�
 
 *（Phase 14 — 已实现）*
 
-支持多个并发方法观察会话（最多 10 个）。每个 `WatchSession` 拥有独立的 Byte Buddy `ResettableClassFileTransformer`。可选的 `conditionExpr` 经同一 OGNL 沙箱在服务端编译求值（`OgnlService.evaluateCondition`）。OGNL 上下文变量：`#args`、`#returnObj`、`#throwExp`、`#cost`、`#target`、`#clazz`。会话在可配置的持续时间后自动过期（默认 60 秒，最大 5 分钟）。
+支持多个并发方法观察会话（最多 10 个）。每个 `WatchSession` 拥有独立的 Byte Buddy `ResettableClassFileTransformer`。可选的 `conditionExpr` 经同一 OGNL 沙箱在服务端编译求值（`OgnlService.evaluateCondition`）。OGNL 上下文变量仅限 `#args`、`#returnObj`、`#throwExp`、`#cost`（纳秒）、`#target`、`#clazz`：标量、数组和 JDK 集合/Map 被复制为有界安全快照，Class 转为类名，异常及其他业务对象只暴露 `type` 描述，不能调用其 getter、`toString()` 或任意方法。会话在可配置的持续时间后自动过期（默认 60 秒，最大 5 分钟）。
 
 ### WebSocket 实时推送
 

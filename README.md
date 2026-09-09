@@ -18,7 +18,7 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ## ✨ Features
 
-> JoltVM is under active development. Phase 1 through Phase 17 are complete; v1.2.1 makes network binding secure by default and adds published-artifact smoke gates. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 through Phase 17 are complete; v1.3.0 makes OGNL default-deny and adds minimum-duration trace filtering. See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, interactive flame graphs (d3-flame-graph), class/method tree navigation, Spring Boot bean browser, and audit dashboard. Edit code and apply hot-fixes visually — all served from the embedded Netty server at `http://localhost:7758`.
@@ -27,7 +27,7 @@ No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Edito
 Edit code in Web IDE → auto-compile → instant class swap via `Instrumentation.redefineClasses()`. No manual `jad` → `mc` → `retransform` workflow. Built-in rollback with original bytecode preservation.
 
 ### 🔥 Interactive Flame Graphs
-Zoomable, searchable flame graphs in the browser (d3-flame-graph). Toggle between CPU time and wall time views. Allocation view and side-by-side comparison are **planned**.
+Zoomable, searchable flame graphs in the browser (d3-flame-graph). Toggle between CPU time and wall time views, and filter method traces with `minDurationMs` before expensive value capture. Method-trace depth is relative to methods instrumented by the active trace; stack sampling or async-profiler is required for a complete JVM call stack. Allocation view and side-by-side comparison are **planned**.
 
 ### 🌱 Spring Boot Awareness
 List all Spring beans with filtering and pagination. Parse `@RequestMapping` endpoints with URL → method mappings. Analyze `@Controller → @Service → @Repository` dependency injection chains with circular dependency detection. Zero compile-time Spring dependencies — works via reflection with Spring Boot 2.x/3.x.
@@ -39,7 +39,7 @@ Visualize the ClassLoader hierarchy tree, browse classes by loader, and detect c
 Auto-detects logging framework (Logback, Log4j2, JUL) via reflection with zero compile-time dependencies. List all loggers, view effective levels, and change log levels dynamically at runtime — all from the browser.
 
 ### 🧮 OGNL Expression Engine
-Evaluate OGNL expressions against the running JVM in a secure sandbox. Four-layer defense-in-depth: pre-parse validation, MemberAccess class/method blacklist (60+ blocked classes), execution timeout (5s), and result depth limiting. 50+ known injection vectors tested and blocked.
+Evaluate read-only OGNL expressions against explicit diagnostic context values. The sandbox is default-deny: only allowlisted scalar, collection, and `RuntimeInfo` methods are callable; static access, constructors, assignment, arbitrary application-object methods, and OGNL internals are rejected. Watch conditions receive bounded safe snapshots, with execution timeout and result-depth limits as additional defenses.
 
 ### 🔒 Security & Audit
 HMAC-SHA256 token-based authentication with three-tier RBAC (Viewer / Operator / Admin). Authentication middleware enforces permissions on every API request. Every hot-fix generates an audit entry with timestamp, operator, reason, and diff. Immutable audit logs with JSON Lines and CSV export. Passwords secured with PBKDF2-SHA256 (310,000 iterations). The server binds to `127.0.0.1` by default; remote binds require authentication unless an explicit development-only override is supplied.
@@ -161,7 +161,7 @@ The primary artifact is the thin Agent API library (do not pass this JAR to
 <dependency>
     <groupId>io.github.lucientong</groupId>
     <artifactId>joltvm-agent</artifactId>
-    <version>1.2.1</version>
+    <version>1.3.0</version>
 </dependency>
 ```
 
@@ -170,7 +170,7 @@ it without adding the fat JAR to your application classpath:
 
 ```bash
 mvn dependency:copy \
-  -Dartifact=io.github.lucientong:joltvm-agent:1.2.1:jar:all \
+  -Dartifact=io.github.lucientong:joltvm-agent:1.3.0:jar:all \
   -DoutputDirectory=.
 ```
 

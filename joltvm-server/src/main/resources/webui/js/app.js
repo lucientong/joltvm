@@ -465,6 +465,8 @@
         if (type === 'trace') {
             body.className = document.getElementById('traceClassName').value.trim();
             body.methodName = document.getElementById('traceMethodName').value.trim() || null;
+            body.minDurationMs = Math.max(0,
+                parseInt(document.getElementById('traceMinDuration').value) || 0);
             if (!body.className) { toast('Enter a class name for trace', 'error'); return; }
         }
         if (type === 'sample') {
@@ -505,6 +507,7 @@
         let info = [];
         if (d.tracing) info.push('Tracing: active');
         if (d.sampling) info.push('Sampling: active');
+        if (d.tracing && d.minDurationMs) info.push('Min duration: ' + d.minDurationMs + 'ms');
         if (d.recordCount != null) info.push('Records: ' + d.recordCount);
         if (d.sampleCount != null) info.push('Samples: ' + d.sampleCount);
         el.textContent = info.length ? info.join(' | ') : 'Idle';

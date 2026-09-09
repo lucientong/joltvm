@@ -146,6 +146,24 @@ class TraceHandlerTest {
     }
 
     @Test
+    @DisplayName("start trace rejects minimum duration outside supported range")
+    void startTraceRejectsInvalidMinimumDuration() {
+        String json = HttpResponseHelper.gson().toJson(Map.of(
+                "type", "trace",
+                "className", "com.example.Test",
+                "minDurationMs", 60_001));
+        FullHttpRequest request = createPostRequest("/api/trace/start", json);
+        FullHttpResponse response = handler.handle(request, Map.of());
+
+        assertEquals(HttpResponseStatus.BAD_REQUEST, response.status());
+        assertTrue(response.content().toString(StandardCharsets.UTF_8)
+                .contains("minDurationMs"));
+
+        response.release();
+        request.release();
+    }
+
+    @Test
     @DisplayName("start sampling returns 200")
     void startSamplingReturns200() {
         String json = HttpResponseHelper.gson().toJson(

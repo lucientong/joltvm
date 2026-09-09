@@ -19,10 +19,12 @@ package com.joltvm.server.ognl;
 import ognl.MemberAccess;
 import ognl.OgnlContext;
 
-import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Member;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -31,16 +33,47 @@ import java.util.regex.Pattern;
  *
  * <p>Implements a defense-in-depth strategy:
  * <ol>
- *   <li><b>Class blacklist</b> — blocks dangerous classes (Runtime, ProcessBuilder, etc.)</li>
- *   <li><b>Method blacklist</b> — blocks dangerous methods (exec, exit, load, etc.)</li>
- *   <li><b>Package blacklist</b> — blocks reflection, scripting, management packages</li>
- *   <li><b>Read-only by default</b> — field writes are blocked</li>
+ *   <li><b>Default deny</b> — only explicitly allowlisted value types and methods are accessible</li>
+ *   <li><b>Read-only syntax</b> — static access, constructors, and assignment are rejected</li>
+ *   <li><b>Hard deny lists</b> — known dangerous classes/packages/methods remain blocked</li>
+ *   <li><b>Sanitized context</b> — callers expose immutable scalar/collection snapshots</li>
  * </ol>
  *
  * <p>This is the #1 security-critical component. Every known OGNL injection
  * vector must be blocked by this class.
  */
 public class SafeOgnlMemberAccess implements MemberAccess {
+
+    private static final Set<String> ALLOWED_RUNTIME_METHODS = Set.of(
+            "freeMemory", "totalMemory", "maxMemory", "availableProcessors",
+            "currentTimeMillis", "nanoTime", "javaVersion", "osName"
+    );
+
+    private static final Set<String> ALLOWED_STRING_METHODS = Set.of(
+            "length", "isEmpty", "charAt", "substring", "contains",
+            "startsWith", "endsWith", "indexOf", "lastIndexOf",
+            "equals", "equalsIgnoreCase", "compareTo", "compareToIgnoreCase",
+            "toLowerCase", "toUpperCase", "trim", "strip", "toString",
+            "hashCode"
+    );
+
+    private static final Set<String> ALLOWED_SCALAR_METHODS = Set.of(
+            "byteValue", "shortValue", "intValue", "longValue", "floatValue",
+            "doubleValue", "booleanValue", "charValue", "equals", "toString",
+            "hashCode", "compareTo"
+    );
+
+    private static final Set<String> ALLOWED_MAP_METHODS = Set.of(
+            "get", "containsKey", "containsValue", "size", "isEmpty"
+    );
+
+    private static final Set<String> ALLOWED_LIST_METHODS = Set.of(
+            "get", "contains", "indexOf", "lastIndexOf", "size", "isEmpty"
+    );
+
+    private static final Set<String> ALLOWED_COLLECTION_METHODS = Set.of(
+            "contains", "size", "isEmpty"
+    );
 
     // ================================================================
     // Hard blacklists — non-overridable, covers all known attack vectors
@@ -175,6 +208,12 @@ public class SafeOgnlMemberAccess implements MemberAccess {
             "@[^@]*(runtime|processbuilder|unsafe|classloader|scriptengine)[^@]*@",
             Pattern.CASE_INSENSITIVE);
 
+    private static final Pattern CONSTRUCTOR_PATTERN =
+            Pattern.compile("(?i)(^|\\W)new\\s+[a-z_$]");
+
+    private static final Pattern ASSIGNMENT_PATTERN =
+            Pattern.compile("(?<![=!<>])=(?!=)");
+
     @Override
     public Object setup(OgnlContext context, Object target, Member member, String propertyName) {
         // No state to set up
@@ -257,7 +296,39 @@ public class SafeOgnlMemberAccess implements MemberAccess {
             }
         }
 
-        return true;
+        return member instanceof Method method
+                && isAllowlistedMethod(target, declaringClass, method.getName());
+    }
+
+    private boolean isAllowlistedMethod(Object target, Class<?> declaringClass, String methodName) {
+        Class<?> effectiveClass = target != null ? target.getClass() : declaringClass;
+        if (effectiveClass == null) {
+            return false;
+        }
+        if (OgnlService.RuntimeInfo.class.isAssignableFrom(effectiveClass)) {
+            return ALLOWED_RUNTIME_METHODS.contains(methodName);
+        }
+        if (effectiveClass == String.class) {
+            return ALLOWED_STRING_METHODS.contains(methodName);
+        }
+        if (Number.class.isAssignableFrom(effectiveClass)
+                || effectiveClass == Boolean.class || effectiveClass == Character.class
+                || effectiveClass.isEnum()) {
+            return ALLOWED_SCALAR_METHODS.contains(methodName);
+        }
+        if (Map.class.isAssignableFrom(effectiveClass)) {
+            return ALLOWED_MAP_METHODS.contains(methodName);
+        }
+        if (List.class.isAssignableFrom(effectiveClass)) {
+            return ALLOWED_LIST_METHODS.contains(methodName);
+        }
+        if (Collection.class.isAssignableFrom(effectiveClass)) {
+            return ALLOWED_COLLECTION_METHODS.contains(methodName);
+        }
+        if (effectiveClass == Class.class) {
+            return isAllowedClassMethod(methodName);
+        }
+        return false;
     }
 
     /**
@@ -287,7 +358,27 @@ public class SafeOgnlMemberAccess implements MemberAccess {
             throw new IllegalArgumentException("Expression must not be blank");
         }
 
-        String normalized = expression.toLowerCase().replaceAll("\\s+", "");
+        String structuralExpression = stripQuotedLiterals(expression);
+        String normalized = structuralExpression.toLowerCase().replaceAll("\\s+", "");
+
+        // Default-deny syntax: expressions may only read/compare/calculate values
+        // from the supplied context. Class access, object construction and mutation
+        // are never needed for diagnostics and substantially expand the attack surface.
+        if (structuralExpression.indexOf('@') >= 0) {
+            throw new SecurityException("Static class access is not allowed");
+        }
+        if (CONSTRUCTOR_PATTERN.matcher(structuralExpression).find()) {
+            throw new SecurityException("Object construction is not allowed");
+        }
+        if (ASSIGNMENT_PATTERN.matcher(structuralExpression).find()
+                || normalized.contains("+=") || normalized.contains("-=")
+                || normalized.contains("*=") || normalized.contains("/=")) {
+            throw new SecurityException("Assignment is not allowed");
+        }
+        if (normalized.contains("#root") || normalized.contains("#this")
+                || normalized.contains("#context")) {
+            throw new SecurityException("OGNL internal context access is not allowed");
+        }
 
         // Block @class@method static access to dangerous classes
         for (String blocked : BLOCKED_CLASSES) {
@@ -327,5 +418,30 @@ public class SafeOgnlMemberAccess implements MemberAccess {
                 normalized.contains("@java.lang.system@")) {
             throw new SecurityException("Access to blocked static class is not allowed");
         }
+    }
+
+    private static String stripQuotedLiterals(String expression) {
+        StringBuilder structural = new StringBuilder(expression.length());
+        char quote = 0;
+        boolean escaped = false;
+        for (int i = 0; i < expression.length(); i++) {
+            char current = expression.charAt(i);
+            if (quote != 0) {
+                structural.append(' ');
+                if (escaped) {
+                    escaped = false;
+                } else if (current == '\\') {
+                    escaped = true;
+                } else if (current == quote) {
+                    quote = 0;
+                }
+            } else if (current == '\'' || current == '"') {
+                quote = current;
+                structural.append(' ');
+            } else {
+                structural.append(current);
+            }
+        }
+        return structural.toString();
     }
 }

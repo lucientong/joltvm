@@ -20,8 +20,15 @@ import ognl.Ognl;
 import ognl.OgnlContext;
 import ognl.OgnlException;
 
+import java.lang.reflect.Array;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -38,9 +45,11 @@ import java.util.logging.Logger;
  * <p>Security model (defense-in-depth):
  * <ol>
  *   <li><b>Pre-parse validation</b> — {@link SafeOgnlMemberAccess#validateExpression(String)}
- *       rejects expressions containing known dangerous patterns before parsing</li>
- *   <li><b>MemberAccess sandbox</b> — {@link SafeOgnlMemberAccess} blocks access to
- *       dangerous classes, methods, packages, and reflection</li>
+ *       rejects mutation, construction, static access, and internal context access</li>
+ *   <li><b>Default-deny MemberAccess</b> — {@link SafeOgnlMemberAccess} allows only
+ *       explicit read-only methods on safe diagnostic value types</li>
+ *   <li><b>Sanitized context</b> — watch values become bounded snapshots and arbitrary
+ *       application objects expose type metadata only</li>
  *   <li><b>Execution timeout</b> — 5-second hard limit via dedicated thread pool</li>
  *   <li><b>Result depth limit</b> — prevents circular reference infinite recursion</li>
  * </ol>
@@ -54,6 +63,12 @@ public class OgnlService {
 
     /** Maximum execution time for a watch condition expression (milliseconds). */
     private static final long CONDITION_TIMEOUT_MS = 500;
+
+    private static final int CONDITION_SNAPSHOT_DEPTH = 4;
+    private static final int CONDITION_SNAPSHOT_ITEMS = 50;
+    private static final Set<String> ALLOWED_CONDITION_VARIABLES = Set.of(
+            "args", "returnObj", "throwExp", "cost", "target", "clazz"
+    );
 
     /** Thread pool for sandboxed expression evaluation. */
     private final ExecutorService executor;
@@ -224,7 +239,7 @@ public class OgnlService {
             // Set up useful context variables
             context.put("runtime", new RuntimeInfo());
             Object parsed = Ognl.parseExpression(expression);
-            return Ognl.getValue(parsed, context, context);
+            return Ognl.getValue(parsed, context, Map.of());
         };
 
         return await(executor.submit(task), TIMEOUT_MS);
@@ -235,15 +250,101 @@ public class OgnlService {
 
         Callable<Object> task = () -> {
             OgnlContext context = Ognl.createDefaultContext(null, memberAccess);
-            if (vars != null) {
-                for (Map.Entry<String, Object> entry : vars.entrySet()) {
-                    context.put(entry.getKey(), entry.getValue());
-                }
+            Map<String, Object> safeVars = sanitizeConditionVariables(vars);
+            for (Map.Entry<String, Object> entry : safeVars.entrySet()) {
+                context.put(entry.getKey(), entry.getValue());
             }
-            return Ognl.getValue(compiled, context, context);
+            return Ognl.getValue(compiled, context, Map.of());
         };
 
         return await(conditionExecutor.submit(task), timeoutMs);
+    }
+
+    static Map<String, Object> sanitizeConditionVariables(Map<String, Object> vars) {
+        Map<String, Object> safe = new LinkedHashMap<>();
+        if (vars == null) {
+            return safe;
+        }
+        for (String key : ALLOWED_CONDITION_VARIABLES) {
+            if (vars.containsKey(key)) {
+                safe.put(key, snapshotValue(vars.get(key), 0));
+            }
+        }
+        return safe;
+    }
+
+    private static Object snapshotValue(Object value, int depth) {
+        if (value == null || value instanceof String || value instanceof Boolean
+                || isTrustedNumber(value)) {
+            return value;
+        }
+        if (value instanceof Character) {
+            return value.toString();
+        }
+        if (value instanceof Enum<?> enumValue) {
+            return enumValue.name();
+        }
+        if (value instanceof Class<?> clazz) {
+            return clazz.getName();
+        }
+        if (value instanceof Throwable throwable) {
+            Map<String, Object> error = new LinkedHashMap<>();
+            error.put("type", throwable.getClass().getName());
+            return error;
+        }
+        if (depth >= CONDITION_SNAPSHOT_DEPTH) {
+            return "[depth-limit]";
+        }
+        if (value.getClass().isArray()) {
+            int length = Math.min(Array.getLength(value), CONDITION_SNAPSHOT_ITEMS);
+            List<Object> result = new ArrayList<>(length);
+            for (int i = 0; i < length; i++) {
+                result.add(snapshotValue(Array.get(value, i), depth + 1));
+            }
+            return result;
+        }
+        if (value instanceof Collection<?> collection && isTrustedContainer(value)) {
+            List<Object> result = new ArrayList<>();
+            int count = 0;
+            for (Object item : collection) {
+                if (count++ >= CONDITION_SNAPSHOT_ITEMS) {
+                    break;
+                }
+                result.add(snapshotValue(item, depth + 1));
+            }
+            return result;
+        }
+        if (value instanceof Map<?, ?> map && isTrustedContainer(value)) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            int count = 0;
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (count++ >= CONDITION_SNAPSHOT_ITEMS) {
+                    break;
+                }
+                Object key = entry.getKey();
+                if (key == null || key instanceof String || key instanceof Character
+                        || key instanceof Boolean || key instanceof Enum<?>
+                        || isTrustedNumber(key)) {
+                    String safeKey = key instanceof Enum<?> e ? e.name() : String.valueOf(key);
+                    result.put(safeKey, snapshotValue(entry.getValue(), depth + 1));
+                }
+            }
+            return result;
+        }
+
+        // Never expose arbitrary application objects to OGNL. The type descriptor
+        // preserves useful diagnostics without invoking getters or toString().
+        return Map.of("type", value.getClass().getName());
+    }
+
+    private static boolean isTrustedNumber(Object value) {
+        return value instanceof Byte || value instanceof Short || value instanceof Integer
+                || value instanceof Long || value instanceof Float || value instanceof Double
+                || value instanceof BigInteger || value instanceof BigDecimal;
+    }
+
+    private static boolean isTrustedContainer(Object value) {
+        return value.getClass().getName().startsWith("java.util.");
     }
 
     private static Object await(Future<Object> future, long timeoutMs)

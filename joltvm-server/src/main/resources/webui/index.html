@@ -129,6 +129,7 @@
                 <input type="text" class="search-input" id="traceClassName" placeholder="Class name (for trace)" style="width:200px">
                 <input type="text" class="search-input" id="traceMethodName" placeholder="Method name (optional)" style="width:160px">
                 <input type="number" class="search-input" id="traceDuration" placeholder="Duration (s)" value="30" style="width:100px" min="1" max="300">
+                <input type="number" class="search-input" id="traceMinDuration" placeholder="Min ms (trace)" value="0" style="width:110px" min="0" max="60000" title="Only record traced calls at least this many milliseconds">
                 <button class="btn btn-primary" id="startTraceBtn">Start</button>
                 <button class="btn btn-danger" id="stopTraceBtn" disabled>Stop</button>
                 <button class="btn" id="refreshFlameBtn">Refresh Graph</button>

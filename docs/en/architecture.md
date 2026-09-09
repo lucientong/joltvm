@@ -534,7 +534,7 @@ JDK `Thread.getAllStackTraces()` sampling has **safepoint bias**; for production
 #### Method Tracing (Byte Buddy Advice)
 
 ```
-POST /api/trace/start  { "type": "trace", "className": "com.example.MyService", "methodName": "process" }
+POST /api/trace/start  { "type": "trace", "className": "com.example.MyService", "methodName": "process", "minDurationMs": 10 }
         │
         ▼
 ┌─────────────────────────┐
@@ -567,6 +567,8 @@ POST /api/trace/start  { "type": "trace", "className": "com.example.MyService", 
 - **Static `activeCollector` field**: Byte Buddy Advice classes must be static; a `volatile` static reference bridges Advice callbacks to the service's `FlameGraphCollector` instance
 - **`Assigner.Typing.DYNAMIC`**: Required for `@Advice.Return` annotation to handle dynamic return types across all instrumented methods
 - **`ConcurrentHashMap.newKeySet()`**: Tracks which classes are currently being traced for idempotent stop/cleanup
+- **Minimum-duration filter**: `minDurationMs` defaults to 0 and accepts 0–60000 ms. Advice discards faster calls after timing but before argument/return-value stringification
+- **Relative-depth semantics**: `TraceRecord.depth` measures nesting only among methods instrumented by the active trace; it is not a complete JVM call tree. Use stack sampling or async-profiler for complete stacks
 
 #### Stack Sampling
 
@@ -704,10 +706,10 @@ HTTP GET request
 
 *(Phase 13 — Implemented)*
 
-JoltVM provides a secure OGNL expression evaluation engine for inspecting runtime objects. Four-layer defense-in-depth security:
+JoltVM provides a read-only OGNL expression engine over explicit diagnostic context values. Four-layer defense-in-depth security:
 
-1. **Pre-parse validation** — Regex-based expression scanning before OGNL parsing
-2. **MemberAccess sandbox** (`SafeOgnlMemberAccess`) — 60+ blocked classes (Runtime, ProcessBuilder, Unsafe, ClassLoader, File, Network, etc.), 25+ blocked methods, 12+ blocked package prefixes, class hierarchy traversal
+1. **Default-deny syntax** — Rejects all static class access, object construction, assignment, and internal context access before parsing
+2. **MemberAccess allowlist** (`SafeOgnlMemberAccess`) — Allows only scalar, read-only collection, and explicit `RuntimeInfo` methods. Arbitrary application-object members are denied, with hard class/package/method deny lists retained as defense in depth
 3. **Execution timeout** — 5-second timeout via `Future.get(5, SECONDS)` in a dedicated thread
 4. **Result depth limiting** (`ResultSerializer`) — Identity-based circular reference detection, depth limit (default 5, max 10), collection size limit (200)
 
@@ -715,7 +717,7 @@ JoltVM provides a secure OGNL expression evaluation engine for inspecting runtim
 
 *(Phase 14 — Implemented)*
 
-Multiple concurrent method observation sessions (max 10). Each `WatchSession` owns its own Byte Buddy `ResettableClassFileTransformer`. Optional `conditionExpr` is compiled and evaluated server-side through the same OGNL sandbox (`OgnlService.evaluateCondition`). Context variables: `#args`, `#returnObj`, `#throwExp`, `#cost`, `#target`, `#clazz`. Sessions auto-expire after configurable duration (default 60s, max 5min).
+Multiple concurrent method observation sessions (max 10). Each `WatchSession` owns its own Byte Buddy `ResettableClassFileTransformer`. Optional `conditionExpr` is compiled and evaluated server-side through the same OGNL sandbox (`OgnlService.evaluateCondition`). Context variables are limited to `#args`, `#returnObj`, `#throwExp`, `#cost` (nanoseconds), `#target`, and `#clazz`: scalars, arrays, and JDK collections/maps become bounded safe snapshots; classes become names; exceptions and other application objects expose only a `type` descriptor and cannot invoke getters, `toString()`, or arbitrary methods. Sessions auto-expire after configurable duration (default 60s, max 5min).
 
 ### WebSocket Real-time Push
 

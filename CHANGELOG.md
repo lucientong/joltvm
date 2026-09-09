@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-10
+
+### Added
+- **Trace cost filter** — `POST /api/trace/start` and the Web IDE accept `minDurationMs` (0–60000) and discard faster calls before argument/return-value stringification.
+- **OGNL allowlist regressions** — Tests cover generic static access, construction, assignment, arbitrary application methods, explicit context variables, and safe nested snapshots.
+
+### Security
+- **Default-deny OGNL** — Static class access, constructors, assignment, OGNL internal context access, and arbitrary application-object members are denied. Only explicit read-only methods on scalar, collection, and `RuntimeInfo` values are callable.
+- **Sanitized Watch conditions** — `#args`, `#returnObj`, `#throwExp`, `#target`, and `#clazz` are converted to bounded safe snapshots; exceptions and arbitrary application objects expose only their type, and unknown context variables are not exposed.
+
+### Changed
+- Method-trace depth is explicitly documented as relative nesting among methods instrumented by the active trace, not a complete JVM call tree.
+- Watch conditions that called methods/getters on arbitrary application objects must use scalar, array, collection, or map data instead; opaque objects now expose only their `type` descriptor.
+- Updated project version to 1.3.0.
+
 ## [1.2.1] - 2026-09-10
 
 ### Fixed

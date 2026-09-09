@@ -18,7 +18,7 @@ JoltVM 是一个 JVM 在线诊断与热修复框架。通过 Java Agent 附着�
 
 ## ✨ 功能特性
 
-> JoltVM 正在积极开发中。Phase 1 至 Phase 17 已完成；v1.2.1 默认采用安全网络绑定，并增加真实发布物 smoke 门禁。完整计划参见[路线图](#-路线图)。
+> JoltVM 正在积极开发中。Phase 1 至 Phase 17 已完成；v1.3.0 将 OGNL 改为默认拒绝模型，并增加方法追踪最小耗时过滤。完整计划参见[路线图](#-路线图)。
 
 ### 🖥️ 浏览器端 Web IDE
 不再需要记忆 50+ 条命令。可视化界面集成 Monaco Editor 代码编辑器、实时日志流、类和方法树导航。在线编辑代码并直接热修复。
@@ -27,7 +27,10 @@ JoltVM 是一个 JVM 在线诊断与热修复框架。通过 Java Agent 附着�
 在 Web IDE 中编辑代码 → 自动编译 → 通过 `Instrumentation.redefineClasses()` 即时替换字节码。无需手动 `jad` → `mc` → `retransform` 流程。内置回滚，保留原始字节码。
 
 ### 🔥 交互式火焰图
-浏览器内可缩放、可搜索的火焰图（d3-flame-graph）。支持 CPU 时间与 Wall 时间视图切换。内存分配视图和前后对比功能为 **计划中**。
+浏览器内可缩放、可搜索的火焰图（d3-flame-graph）。支持 CPU 时间与 Wall 时间视图切换，并可用 `minDurationMs` 在昂贵的值采集前过滤短调用。方法追踪的 depth 仅表示本次已插桩方法之间的相对深度；完整 JVM 调用栈应使用栈采样或 async-profiler。内存分配视图和前后对比功能为 **计划中**。
+
+### 🧮 OGNL 表达式引擎
+执行面向显式诊断上下文的只读 OGNL 表达式。沙箱采用默认拒绝模型：只允许白名单中的标量、集合和 `RuntimeInfo` 方法；静态访问、对象构造、赋值、任意业务对象方法及 OGNL 内部上下文全部拒绝。Watch 条件仅接收有深度和数量上限的安全快照，并继续受执行超时限制。
 
 ### 🌱 Spring Boot 感知
 列出所有 Spring Bean，支持过滤和分页。解析 `@RequestMapping` 端点，展示 URL → 方法映射。分析 `@Controller → @Service → @Repository` 依赖注入调用链，支持循环依赖检测。零编译期 Spring 依赖 —— 通过反射实现，兼容 Spring Boot 2.x/3.x。
@@ -148,7 +151,7 @@ JoltVM 由以下模块组成（详见[架构文档](docs/zh/architecture.md)）�
 <dependency>
     <groupId>io.github.lucientong</groupId>
     <artifactId>joltvm-agent</artifactId>
-    <version>1.2.1</version>
+    <version>1.3.0</version>
 </dependency>
 ```
 
@@ -157,7 +160,7 @@ JoltVM 由以下模块组成（详见[架构文档](docs/zh/architecture.md)）�
 
 ```bash
 mvn dependency:copy \
-  -Dartifact=io.github.lucientong:joltvm-agent:1.2.1:jar:all \
+  -Dartifact=io.github.lucientong:joltvm-agent:1.3.0:jar:all \
   -DoutputDirectory=.
 ```
 

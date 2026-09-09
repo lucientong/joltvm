@@ -20,12 +20,27 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.AbstractMap;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class OgnlConditionTest {
+
+    static final class SensitiveTarget {
+        public String readSecret() {
+            return "secret";
+        }
+    }
+
+    static final class ApplicationMap extends AbstractMap<String, Object> {
+        @Override
+        public Set<Entry<String, Object>> entrySet() {
+            throw new AssertionError("application collection methods must not be invoked");
+        }
+    }
 
     private OgnlService ognlService;
 
@@ -84,6 +99,31 @@ class OgnlConditionTest {
         Map<String, Object> ctx = Map.of("throwExp", new RuntimeException("x"));
         assertTrue(ognlService.evaluateCondition("#throwExp != null", ctx));
         assertFalse(ognlService.evaluateCondition("#throwExp != null", Map.of()));
+    }
+
+    @Test
+    void conditionContextSnapshotsApplicationObjectsWithoutInvokingMethods() {
+        Map<String, Object> ctx = Map.of("target", new SensitiveTarget());
+        assertTrue(ognlService.evaluateCondition(
+                "#target['type'].contains('SensitiveTarget')", ctx));
+        assertFalse(ognlService.evaluateCondition("#target.readSecret() == 'secret'", ctx));
+    }
+
+    @Test
+    void conditionContextKeepsOnlyExplicitVariablesAndSafeNestedValues() {
+        Map<String, Object> ctx = new HashMap<>();
+        ctx.put("args", new Object[]{Map.of("name", "jolt")});
+        ctx.put("unexpected", Runtime.getRuntime());
+
+        assertTrue(ognlService.evaluateCondition("#args[0]['name'] == 'jolt'", ctx));
+        assertFalse(ognlService.evaluateCondition("#unexpected != null", ctx));
+    }
+
+    @Test
+    void conditionContextDoesNotTraverseApplicationCollectionImplementations() {
+        Map<String, Object> ctx = Map.of("args", new Object[]{new ApplicationMap()});
+        assertTrue(ognlService.evaluateCondition(
+                "#args[0]['type'].contains('ApplicationMap')", ctx));
     }
 
     @Test

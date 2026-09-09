@@ -22,6 +22,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class SafeOgnlMemberAccessTest {
 
+    public static final class ApplicationObject {
+        public String secret() {
+            return "secret";
+        }
+    }
+
     @Test
     void validateExpressionRejectsBlank() {
         assertThrows(IllegalArgumentException.class,
@@ -63,10 +69,27 @@ class SafeOgnlMemberAccessTest {
     }
 
     @Test
+    void validateExpressionRejectsAllStaticAccess() {
+        assertThrows(SecurityException.class,
+                () -> SafeOgnlMemberAccess.validateExpression("@java.lang.Math@abs(-1)"));
+    }
+
+    @Test
+    void validateExpressionRejectsConstructionAndAssignment() {
+        assertThrows(SecurityException.class,
+                () -> SafeOgnlMemberAccess.validateExpression("new java.lang.String('x')"));
+        assertThrows(SecurityException.class,
+                () -> SafeOgnlMemberAccess.validateExpression("#value = 1"));
+        assertDoesNotThrow(() -> SafeOgnlMemberAccess.validateExpression("#value == 1"));
+    }
+
+    @Test
     void validateExpressionAllowsSafeExpressions() {
         assertDoesNotThrow(() -> SafeOgnlMemberAccess.validateExpression("1 + 1"));
         assertDoesNotThrow(() -> SafeOgnlMemberAccess.validateExpression("\"hello\".toUpperCase()"));
         assertDoesNotThrow(() -> SafeOgnlMemberAccess.validateExpression("{1, 2, 3}"));
+        assertDoesNotThrow(() -> SafeOgnlMemberAccess.validateExpression(
+                "'new java.lang.Runtime user@example.com = text'"));
     }
 
     @Test
@@ -100,6 +123,22 @@ class SafeOgnlMemberAccessTest {
         } catch (NoSuchMethodException e) {
             fail("toUpperCase should exist on String");
         }
+    }
+
+    @Test
+    void isAccessibleDeniesApplicationMethodsByDefault() throws Exception {
+        SafeOgnlMemberAccess access = new SafeOgnlMemberAccess();
+        ApplicationObject target = new ApplicationObject();
+        java.lang.reflect.Method method = ApplicationObject.class.getMethod("secret");
+        assertFalse(access.isAccessible(null, target, method, null));
+    }
+
+    @Test
+    void isAccessibleAllowsExplicitRuntimeFacadeMethods() throws Exception {
+        SafeOgnlMemberAccess access = new SafeOgnlMemberAccess();
+        OgnlService.RuntimeInfo target = new OgnlService.RuntimeInfo();
+        java.lang.reflect.Method method = OgnlService.RuntimeInfo.class.getMethod("freeMemory");
+        assertTrue(access.isAccessible(null, target, method, null));
     }
 
     @Test

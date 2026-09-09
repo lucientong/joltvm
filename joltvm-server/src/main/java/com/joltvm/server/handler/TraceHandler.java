@@ -44,6 +44,7 @@ import java.util.logging.Logger;
  *   "className": "com.example.MyService",  // required for "trace"
  *   "methodName": "handleRequest",         // optional, "*" for all methods
  *   "duration": 30,                        // seconds (default: 30, max: 300)
+ *   "minDurationMs": 10,                   // trace only calls lasting at least 10ms
  *   "interval": 10,                        // sampling interval in ms (for "sample" type)
  *   "includeDaemon": true                  // optional, sample daemon threads (default true)
  * }
@@ -125,14 +126,20 @@ public class TraceHandler implements RouteHandler {
 
         String methodName = (String) bodyMap.get("methodName");
         int duration = getIntField(bodyMap, "duration", 30);
+        int minDurationMs = getIntField(bodyMap, "minDurationMs", 0);
+        if (minDurationMs < 0 || minDurationMs > 60_000) {
+            return HttpResponseHelper.error(HttpResponseStatus.BAD_REQUEST,
+                    "Field 'minDurationMs' must be between 0 and 60000");
+        }
 
-        traceService.startTrace(className, methodName, duration);
+        traceService.startTrace(className, methodName, duration, minDurationMs);
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("success", true);
         response.put("type", "trace");
         response.put("target", traceService.getCurrentTraceTarget());
         response.put("duration", duration);
+        response.put("minDurationMs", minDurationMs);
         response.put("message", "Method tracing started");
 
         return HttpResponseHelper.json(response);

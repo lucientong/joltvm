@@ -101,6 +101,9 @@ public class MethodTraceService {
     /** Whether stack sampling includes daemon threads (default true). */
     private volatile boolean includeDaemon = true;
 
+    /** Minimum wall-clock duration required for a trace record. */
+    private volatile long minDurationNanos;
+
     /**
      * Holds the {@link ResettableClassFileTransformer} returned by the last
      * {@code AgentBuilder.installOn()} call. Used in {@link #stopTrace()} to properly
@@ -111,6 +114,9 @@ public class MethodTraceService {
 
     /** Shared storage for trace records from the Advice callback. */
     private static volatile FlameGraphCollector activeCollector;
+
+    /** Shared duration threshold read by injected Advice. */
+    private static volatile long activeMinDurationNanos;
 
     /**
      * Returns the currently active collector (used by Advice callback).
@@ -193,6 +199,24 @@ public class MethodTraceService {
      * @throws TracingException if tracing cannot be started
      */
     public void startTrace(String className, String methodName, int durationSeconds) {
+        startTrace(className, methodName, durationSeconds, 0);
+    }
+
+    /**
+     * Starts method tracing with an optional minimum duration filter.
+     *
+     * <p>The recorded depth is relative to methods instrumented by this trace,
+     * not a complete JVM call tree. Invocations faster than {@code minDurationMs}
+     * are discarded before argument/result stringification.
+     *
+     * @param className       the fully qualified class name to trace
+     * @param methodName      the method name to trace (null or "*" for all methods)
+     * @param durationSeconds how long to trace
+     * @param minDurationMs   minimum invocation duration in milliseconds (0 disables filtering)
+     * @throws TracingException if tracing cannot be started
+     */
+    public void startTrace(
+            String className, String methodName, int durationSeconds, int minDurationMs) {
         if (className == null || className.isBlank()) {
             throw new TracingException("Class name is required for tracing");
         }
@@ -207,15 +231,19 @@ public class MethodTraceService {
         }
 
         int duration = normalizeDuration(durationSeconds);
+        int effectiveMinDurationMs = Math.max(0, Math.min(60_000, minDurationMs));
         String effectiveMethod = (methodName == null || methodName.isBlank() || "*".equals(methodName))
                 ? "*" : methodName;
         currentTraceTarget = className + "#" + effectiveMethod;
+        minDurationNanos = effectiveMinDurationMs * 1_000_000L;
 
-        LOG.info("Starting method trace: " + currentTraceTarget + " (duration=" + duration + "s)");
+        LOG.info("Starting method trace: " + currentTraceTarget + " (duration=" + duration
+                + "s, minDurationMs=" + effectiveMinDurationMs + ")");
 
         try {
             // Set up the active collector for the Advice callback
             // tracing is already set to true by compareAndSet above
+            activeMinDurationNanos = minDurationNanos;
             activeCollector = collector;
             tracedClasses.add(className);
 
@@ -256,11 +284,13 @@ public class MethodTraceService {
         } catch (TracingException e) {
             tracing.set(false);
             activeCollector = null;
+            activeMinDurationNanos = 0;
             currentTraceTarget = null;
             throw e;
         } catch (Exception e) {
             tracing.set(false);
             activeCollector = null;
+            activeMinDurationNanos = 0;
             currentTraceTarget = null;
             throw new TracingException("Failed to start tracing: " + e.getMessage(), e);
         }
@@ -279,6 +309,7 @@ public class MethodTraceService {
 
         LOG.info("Stopping method trace: " + currentTraceTarget);
         activeCollector = null;
+        activeMinDurationNanos = 0;
 
         if (traceStopFuture != null) {
             traceStopFuture.cancel(false);
@@ -425,6 +456,7 @@ public class MethodTraceService {
         status.put("sampling", sampling.get());
         status.put("includeDaemon", includeDaemon);
         status.put("traceTarget", currentTraceTarget);
+        status.put("minDurationMs", minDurationNanos / 1_000_000L);
         status.put("tracedClasses", new ArrayList<>(tracedClasses));
         status.put("recordCount", collector.getRecordCount());
         status.put("sampleCount", collector.getSampleCount());
@@ -475,6 +507,10 @@ public class MethodTraceService {
             return DEFAULT_TRACE_DURATION_SECONDS;
         }
         return Math.min(durationSeconds, MAX_TRACE_DURATION_SECONDS);
+    }
+
+    static boolean meetsMinDuration(long durationNanos, long minDurationNanos) {
+        return durationNanos >= minDurationNanos;
     }
 
     private void ensureScheduler() {
@@ -550,6 +586,9 @@ public class MethodTraceService {
                 }
 
                 long durationNanos = System.nanoTime() - startTime;
+                if (!meetsMinDuration(durationNanos, activeMinDurationNanos)) {
+                    return;
+                }
                 Thread currentThread = Thread.currentThread();
 
                 // Extract parameter types from signature

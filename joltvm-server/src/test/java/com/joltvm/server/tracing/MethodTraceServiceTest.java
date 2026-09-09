@@ -253,4 +253,12 @@ class MethodTraceServiceTest {
         MethodTraceService.MethodTraceAdvice.onExit(t1, null, null, "outer", "C", "outer()", new Object[0]);
         assertEquals(0, MethodTraceService.MethodTraceAdvice.currentDepth());
     }
+
+    @Test
+    @DisplayName("minimum trace duration includes boundary and filters faster calls")
+    void minimumTraceDurationFilterUsesInclusiveBoundary() {
+        assertFalse(MethodTraceService.meetsMinDuration(9_999_999L, 10_000_000L));
+        assertTrue(MethodTraceService.meetsMinDuration(10_000_000L, 10_000_000L));
+        assertTrue(MethodTraceService.meetsMinDuration(1L, 0L));
+    }
 }
