@@ -52,8 +52,14 @@ public class OgnlService {
     /** Maximum execution time for a single expression (milliseconds). */
     private static final long TIMEOUT_MS = 5000;
 
+    /** Maximum execution time for a watch condition expression (milliseconds). */
+    private static final long CONDITION_TIMEOUT_MS = 500;
+
     /** Thread pool for sandboxed expression evaluation. */
     private final ExecutorService executor;
+
+    /** Separate pool for watch condition eval so it never queues behind interactive OGNL. */
+    private final ExecutorService conditionExecutor;
 
     /** Security sandbox for member access control. */
     private final SafeOgnlMemberAccess memberAccess;
@@ -63,6 +69,11 @@ public class OgnlService {
         // Single-threaded pool — only one expression at a time
         this.executor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "joltvm-ognl-eval");
+            t.setDaemon(true);
+            return t;
+        });
+        this.conditionExecutor = Executors.newFixedThreadPool(2, r -> {
+            Thread t = new Thread(r, "joltvm-ognl-condition");
             t.setDaemon(true);
             return t;
         });
@@ -142,6 +153,67 @@ public class OgnlService {
     }
 
     /**
+     * Validates and precompiles a watch condition expression.
+     *
+     * @param expression OGNL boolean condition (e.g. {@code #cost > 1000000})
+     * @return compiled OGNL AST
+     * @throws IllegalArgumentException if blank or unparseable
+     * @throws SecurityException if the expression fails security validation
+     */
+    public Object compileCondition(String expression) {
+        SafeOgnlMemberAccess.validateExpression(expression);
+        try {
+            return Ognl.parseExpression(expression);
+        } catch (OgnlException e) {
+            throw new IllegalArgumentException(
+                    "Failed to parse condition expression: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Evaluates a watch condition against the given context variables.
+     *
+     * <p>Context keys typically include {@code args}, {@code returnObj}, {@code throwExp},
+     * {@code cost}, {@code target}, {@code clazz} (accessed in OGNL as {@code #args} etc.).
+     *
+     * <p>Returns {@code true} only when the result is exactly {@link Boolean#TRUE}.
+     * Non-boolean results, timeouts, and evaluation errors return {@code false}
+     * (caller should skip recording; do not fail the business thread).
+     *
+     * @param expression condition expression string
+     * @param ctx        OGNL context variables (may be null)
+     * @return whether the condition matched
+     */
+    public boolean evaluateCondition(String expression, Map<String, Object> ctx) {
+        try {
+            return evaluateCondition(compileCondition(expression), ctx);
+        } catch (Exception e) {
+            LOG.log(Level.FINE, "Watch condition compile/eval failed", e);
+            return false;
+        }
+    }
+
+    /**
+     * Evaluates a precompiled watch condition against the given context variables.
+     *
+     * @param compiledExpr AST from {@link #compileCondition(String)}
+     * @param ctx          OGNL context variables (may be null)
+     * @return whether the condition matched ({@code true} only for Boolean.TRUE)
+     */
+    public boolean evaluateCondition(Object compiledExpr, Map<String, Object> ctx) {
+        if (compiledExpr == null) {
+            return true;
+        }
+        try {
+            Object result = evaluateCompiledWithTimeout(compiledExpr, ctx, CONDITION_TIMEOUT_MS);
+            return Boolean.TRUE.equals(result);
+        } catch (Exception e) {
+            LOG.log(Level.FINE, "Watch condition evaluation failed", e);
+            return false;
+        }
+    }
+
+    /**
      * Evaluates the expression in a sandboxed thread with timeout.
      */
     private Object evaluateWithTimeout(String expression)
@@ -155,9 +227,29 @@ public class OgnlService {
             return Ognl.getValue(parsed, context, context);
         };
 
-        Future<Object> future = executor.submit(task);
+        return await(executor.submit(task), TIMEOUT_MS);
+    }
+
+    private Object evaluateCompiledWithTimeout(Object compiled, Map<String, Object> vars, long timeoutMs)
+            throws OgnlException, TimeoutException, SecurityException {
+
+        Callable<Object> task = () -> {
+            OgnlContext context = Ognl.createDefaultContext(null, memberAccess);
+            if (vars != null) {
+                for (Map.Entry<String, Object> entry : vars.entrySet()) {
+                    context.put(entry.getKey(), entry.getValue());
+                }
+            }
+            return Ognl.getValue(compiled, context, context);
+        };
+
+        return await(conditionExecutor.submit(task), timeoutMs);
+    }
+
+    private static Object await(Future<Object> future, long timeoutMs)
+            throws OgnlException, TimeoutException, SecurityException {
         try {
-            return future.get(TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            return future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
             throw e;
@@ -173,10 +265,11 @@ public class OgnlService {
     }
 
     /**
-     * Shuts down the evaluation thread pool.
+     * Shuts down the evaluation thread pools.
      */
     public void shutdown() {
         executor.shutdownNow();
+        conditionExecutor.shutdownNow();
     }
 
     /**

@@ -136,7 +136,8 @@ public final class JoltVMCli {
             System.out.println();
             System.out.printf("✓ Successfully attached JoltVM agent to JVM [pid=%s]%n", pid);
             System.out.println("  The JoltVM agent is now running inside the target JVM.");
-            System.out.println("  Web IDE will be available at http://localhost:7758 once the server module is enabled.");
+            System.out.println("  Web IDE: http://localhost:7758");
+            System.out.println("  Health:  http://localhost:7758/api/health");
         } catch (Exception e) {
             System.err.println();
             System.err.printf("✗ Failed to attach to JVM [pid=%s]%n", pid);
@@ -147,6 +148,7 @@ public final class JoltVMCli {
             System.err.println("  2. Ensure you're running a full JDK (not JRE)");
             System.err.println("  3. Ensure you have permission to attach to the target process");
             System.err.println("  4. On macOS, you may need to run with sudo");
+            System.err.println("  5. Or set -Djoltvm.agent.jar=/path/to/joltvm-agent-*-all.jar");
             System.exit(1);
         }
     }

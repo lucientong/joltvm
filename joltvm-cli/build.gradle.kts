@@ -24,21 +24,47 @@ application {
 }
 
 dependencies {
-    // Core agent module (for AttachHelper)
+    // Thin agent library only (AttachHelper). The fat agent is embedded as a resource.
     implementation(project(":joltvm-agent"))
 }
 
 tasks.processResources {
-    // Generate version.properties from gradle.properties version,
-    // so that JoltVMCli reads the version at runtime instead of hardcoding.
     filesMatching("version.properties") {
         expand("projectVersion" to project.version)
     }
 }
 
+val embeddedAgentDir = layout.buildDirectory.dir("generated-resources")
+
+/**
+ * Copy the canonical agent fat JAR under a non-.jar extension so the Shadow plugin
+ * does not explode/merge it into the CLI classpath.
+ */
+val prepareEmbeddedAgent by tasks.registering(Copy::class) {
+    dependsOn(":joltvm-distribution:shadowJar")
+    from(project(":joltvm-distribution").tasks.named("shadowJar").map { it.outputs.files })
+    into(embeddedAgentDir.map { it.dir("agent") })
+    rename { "joltvm-agent-all.jar.embedded" }
+}
+
+sourceSets {
+    main {
+        resources.srcDir(embeddedAgentDir)
+    }
+}
+
+tasks.named("processResources") {
+    dependsOn(prepareEmbeddedAgent)
+}
+
+tasks.named("sourcesJar") {
+    dependsOn(prepareEmbeddedAgent)
+}
+
 tasks.shadowJar {
     archiveClassifier.set("all")
     mergeServiceFiles()
+    dependsOn(prepareEmbeddedAgent)
 
     manifest {
         attributes(

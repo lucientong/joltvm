@@ -14,7 +14,7 @@
 #
 # Build:
 #   docker build -t lucientong/joltvm .
-#   docker build --build-arg JOLTVM_VERSION=0.9.0 -t lucientong/joltvm:0.9.0 .
+#   docker build --build-arg JOLTVM_VERSION=1.1.0 -t lucientong/joltvm:1.1.0 .
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -33,18 +33,20 @@ RUN chmod +x gradlew && ./gradlew --no-daemon --version
 COPY joltvm-agent/build.gradle.kts joltvm-agent/
 COPY joltvm-server/build.gradle.kts joltvm-server/
 COPY joltvm-cli/build.gradle.kts joltvm-cli/
+COPY joltvm-distribution/build.gradle.kts joltvm-distribution/
+COPY joltvm-tunnel/build.gradle.kts joltvm-tunnel/
 RUN ./gradlew dependencies --no-daemon || true
 
 # Copy full source and build shadow JARs (tests skipped — run in CI)
 COPY . .
-RUN ./gradlew shadowJar -x test --no-daemon
+RUN ./gradlew :joltvm-distribution:shadowJar :joltvm-cli:shadowJar -x test --no-daemon
 
 # ---------------------------------------------------------------------------
 # Stage 2: Runtime
 # ---------------------------------------------------------------------------
 FROM eclipse-temurin:17-jdk
 
-ARG JOLTVM_VERSION=0.9.0
+ARG JOLTVM_VERSION=1.1.0
 
 # OCI image labels
 LABEL org.opencontainers.image.title="JoltVM" \
@@ -61,7 +63,7 @@ ENV JOLTVM_HOME=/opt/joltvm \
 RUN mkdir -p ${JOLTVM_HOME}
 
 # Copy fat JARs from builder stage
-COPY --from=builder /build/joltvm-agent/build/libs/joltvm-agent-${JOLTVM_VERSION}-all.jar \
+COPY --from=builder /build/joltvm-distribution/build/libs/joltvm-agent-${JOLTVM_VERSION}-all.jar \
                     ${JOLTVM_HOME}/joltvm-agent.jar
 COPY --from=builder /build/joltvm-cli/build/libs/joltvm-cli-${JOLTVM_VERSION}-all.jar \
                     ${JOLTVM_HOME}/joltvm-cli.jar

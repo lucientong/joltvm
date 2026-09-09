@@ -105,7 +105,10 @@ jobs:
           ORG_GRADLE_PROJECT_signingKey: ${{ secrets.SIGNING_KEY }}
 
       - name: Build shadow JARs for release assets
-        run: ./gradlew shadowJar --no-daemon
+        run: ./gradlew :joltvm-distribution:shadowJar :joltvm-cli:shadowJar :joltvm-tunnel:shadowJar --no-daemon
+
+      - name: Verify canonical agent fat JAR
+        run: ./gradlew :joltvm-distribution:verifyShadowJar --no-daemon
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -113,8 +116,9 @@ jobs:
           tag_name: ${{ steps.resolve.outputs.tag }}
           generate_release_notes: true
           files: |
-            joltvm-agent/build/libs/*-all.jar
+            joltvm-distribution/build/libs/*-all.jar
             joltvm-cli/build/libs/*-all.jar
+            joltvm-tunnel/build/libs/*-all.jar
 
   # ===========================================================================
   # Job 2: Build & push multi-platform Docker image (runs after Maven publish)

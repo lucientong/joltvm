@@ -96,4 +96,25 @@ class RequestCorrelatorTest {
         assertTrue(response.headers().isEmpty());
         assertNull(response.body());
     }
+
+    @Test
+    void testCancelForAgentOnlyAffectsThatAgent() {
+        CompletableFuture<RequestCorrelator.ProxiedResponse> a1 =
+                correlator.registerRequest("r1", "agent-a");
+        CompletableFuture<RequestCorrelator.ProxiedResponse> a2 =
+                correlator.registerRequest("r2", "agent-a");
+        CompletableFuture<RequestCorrelator.ProxiedResponse> b1 =
+                correlator.registerRequest("r3", "agent-b");
+
+        correlator.cancelForAgent("agent-a", "disconnected");
+
+        assertTrue(a1.isCompletedExceptionally());
+        assertTrue(a2.isCompletedExceptionally());
+        assertFalse(b1.isDone());
+        assertEquals(1, correlator.getPendingCount());
+
+        assertTrue(correlator.completeRequest("r3",
+                new RequestCorrelator.ProxiedResponse("r3", 200, Map.of(), "ok")));
+        assertEquals("ok", b1.join().body());
+    }
 }

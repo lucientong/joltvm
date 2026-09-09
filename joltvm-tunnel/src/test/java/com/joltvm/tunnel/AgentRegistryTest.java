@@ -168,4 +168,24 @@ class AgentRegistryTest {
         assertEquals(1000L, updated.connectedAt());
         assertEquals("agent-1", updated.agentId());
     }
+
+    @Test
+    void testRegisterSameAgentIdClosesOldChannel() {
+        Channel oldChannel = mock(Channel.class);
+        Channel newChannel = mock(Channel.class);
+        when(oldChannel.isActive()).thenReturn(true);
+
+        registry.register("agent-1", oldChannel, Map.of("v", "1"));
+        assertEquals(oldChannel, registry.getAgent("agent-1").channel());
+        assertEquals("agent-1", registry.getAgentId(oldChannel));
+
+        registry.register("agent-1", newChannel, Map.of("v", "2"));
+
+        assertEquals(1, registry.getAgentCount());
+        assertEquals(newChannel, registry.getAgent("agent-1").channel());
+        assertEquals("2", registry.getAgent("agent-1").metadata().get("v"));
+        assertNull(registry.getAgentId(oldChannel));
+        assertEquals("agent-1", registry.getAgentId(newChannel));
+        verify(oldChannel).close();
+    }
 }

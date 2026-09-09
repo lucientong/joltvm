@@ -16,7 +16,8 @@
 
 plugins {
     `java-library`
-    id("com.gradleup.shadow")
+    // Shadow is no longer used here — the canonical fat JAR is produced by
+    // :joltvm-distribution. Keep this module as a thin library for Maven Central.
 }
 
 dependencies {
@@ -42,29 +43,4 @@ tasks.jar {
             "Implementation-Version" to project.version
         )
     }
-}
-
-tasks.shadowJar {
-    archiveClassifier.set("all")
-    mergeServiceFiles()
-
-    manifest {
-        attributes(
-            "Premain-Class" to "com.joltvm.agent.JoltVMAgent",
-            "Agent-Class" to "com.joltvm.agent.JoltVMAgent",
-            "Can-Redefine-Classes" to "true",
-            "Can-Retransform-Classes" to "true",
-            "Can-Set-Native-Method-Prefix" to "true",
-            "Implementation-Title" to "JoltVM Agent",
-            "Implementation-Version" to project.version
-        )
-    }
-
-    // Relocate shaded dependencies to avoid conflicts with target application
-    relocate("net.bytebuddy", "com.joltvm.shaded.bytebuddy")
-    relocate("com.google.gson", "com.joltvm.shaded.gson")
-    relocate("org.objectweb.asm", "com.joltvm.shaded.asm")
-    relocate("io.netty", "com.joltvm.shaded.netty")
-    relocate("org.benf.cfr", "com.joltvm.shaded.cfr")
-    relocate("com.github.difflib", "com.joltvm.shaded.difflib")
 }

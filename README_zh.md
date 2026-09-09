@@ -18,7 +18,7 @@ JoltVM 是一个 JVM 在线诊断与热修复框架。通过 Java Agent 附着�
 
 ## ✨ 功能特性
 
-> JoltVM 正在积极开发中。Phase 1 至 Phase 17 已完成 — v1.0.0 正式发布！完整计划参见[路线图](#-路线图)。
+> JoltVM 正在积极开发中。Phase 1 至 Phase 17 已完成；v1.1.0 新增发行打包、安全、生命周期、诊断准确性与多 ClassLoader 热替换加固。完整计划参见[路线图](#-路线图)。
 
 ### 🖥️ 浏览器端 Web IDE
 不再需要记忆 50+ 条命令。可视化界面集成 Monaco Editor 代码编辑器、实时日志流、类和方法树导航。在线编辑代码并直接热修复。
@@ -53,6 +53,10 @@ JoltVM 是一个 JVM 在线诊断与热修复框架。通过 Java Agent 附着�
 git clone https://github.com/lucientong/joltvm.git
 cd joltvm
 ./gradlew build
+
+# 规范发行 Agent fat JAR（agent + server + 重定位依赖）
+./gradlew :joltvm-distribution:shadowJar
+# → joltvm-distribution/build/libs/joltvm-agent-*-all.jar
 ```
 
 ### 附着到运行中的 JVM
@@ -61,14 +65,14 @@ cd joltvm
 # 列出所有运行中的 JVM 进程
 java -jar joltvm-cli/build/libs/joltvm-cli-*-all.jar list
 
-# 附着 JoltVM Agent 到目标 PID
+# 附着 JoltVM Agent 到目标 PID（CLI 内嵌 distribution Agent JAR）
 java -jar joltvm-cli/build/libs/joltvm-cli-*-all.jar attach <pid>
 
 # 或使用 -javaagent 启动时挂载
-java -javaagent:joltvm-agent/build/libs/joltvm-agent-*-all.jar -jar your-app.jar
+java -javaagent:joltvm-distribution/build/libs/joltvm-agent-*-all.jar -jar your-app.jar
 
 # 带自定义配置（逗号分隔的 key=value 参数）
-java -javaagent:joltvm-agent/build/libs/joltvm-agent-*-all.jar=port=7758,security=true,adminPassword=MySecret,auditFile=/var/log/joltvm-audit.jsonl -jar your-app.jar
+java -javaagent:joltvm-distribution/build/libs/joltvm-agent-*-all.jar=port=7758,security=true,adminPassword=MySecret,auditFile=/var/log/joltvm-audit.jsonl -jar your-app.jar
 ```
 
 ### Agent 参数说明
@@ -84,12 +88,14 @@ java -javaagent:joltvm-agent/build/libs/joltvm-agent-*-all.jar=port=7758,securit
 | `tunnelServer`  | *(无)*                              | Tunnel Server 的 WebSocket URL（如 `wss://tunnel.example.com:8800/ws/agent`）——设置后启用远程诊断 |
 | `tunnelToken`   | *(空)*                              | Tunnel Server 的预共享注册令牌                                |
 | `tunnelAgentId` | `{主机名}-{PID}`                    | 自定义 Agent 标识符                                           |
+| `tunnelTrustCert` | *(无)*                            | `wss://` 连接时使用的自定义 CA / 信任证书（PEM）              |
+| `tunnelInsecureSkipVerify` | `false`                  | 显式跳过 Tunnel TLS 证书校验（仅开发用）                     |
 
 ---
 
 ## 🏗️ 架构
 
-JoltVM 由四个模块组成（详见[架构文档](docs/zh/architecture.md)）：
+JoltVM 由以下模块组成（详见[架构文档](docs/zh/architecture.md)）：
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -122,6 +128,7 @@ JoltVM 由四个模块组成（详见[架构文档](docs/zh/architecture.md)）�
 |------|------|------|
 | `joltvm-agent` | Java Agent 核心 — premain/agentmain 入口、Instrumentation 管理、Attach API | ✅ Phase 1 |
 | `joltvm-server` | 嵌入式 Netty HTTP 服务器，提供 REST API（类列表、详情、反编译、热替换、追踪、Spring 感知、安全审计）+ Web UI | ✅ Phase 2–7 |
+| `joltvm-distribution` | 规范发行 fat JAR（合并 agent + server + 重定位依赖） | ✅ |
 | `joltvm-cli` | 命令行工具，将 Agent 附着到运行中的 JVM 进程 | ✅ Phase 1 |
 | `joltvm-ui` | 浏览器端 Web IDE（嵌入 joltvm-server） | ✅ Phase 6 |
 | `joltvm-tunnel` | 独立隧道服务器，通过反向代理实现远程 JVM 诊断 | ✅ Phase 17 |
@@ -136,13 +143,13 @@ JoltVM 由四个模块组成（详见[架构文档](docs/zh/architecture.md)）�
 <dependency>
     <groupId>io.github.lucientong</groupId>
     <artifactId>joltvm-agent</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
 </dependency>
 ```
 
 ```kotlin
 // Gradle Kotlin DSL
-implementation("io.github.lucientong:joltvm-agent:1.0.0")
+implementation("io.github.lucientong:joltvm-agent:1.1.0")
 ```
 
 ---
@@ -157,8 +164,10 @@ Tunnel Server 支持诊断防火墙或 Kubernetes Pod 内的 JVM，无需开放�
 # 在默认端口 8800 启动
 java -jar joltvm-tunnel/build/libs/joltvm-tunnel-*-all.jar
 
-# 配置注册令牌（生产环境推荐）
-java -jar joltvm-tunnel/build/libs/joltvm-tunnel-*-all.jar --token=SECRET1 --token=SECRET2
+# Agent 注册令牌 + HTTP 访问令牌（生产环境推荐）
+java -jar joltvm-tunnel/build/libs/joltvm-tunnel-*-all.jar \
+  --token=SECRET1 --token=SECRET2 \
+  --access-token=HTTP_SECRET
 
 # 配置 TLS
 java -jar joltvm-tunnel/build/libs/joltvm-tunnel-*-all.jar --tls-cert=cert.pem --tls-key=key.pem
@@ -168,9 +177,14 @@ java -jar joltvm-tunnel/build/libs/joltvm-tunnel-*-all.jar --tls-cert=cert.pem -
 
 ```bash
 java -javaagent:joltvm-agent.jar=tunnelServer=ws://tunnel-server:8800/ws/agent,tunnelToken=SECRET1 -jar your-app.jar
+
+# wss:// 使用自定义 CA（优先于跳过校验）
+java -javaagent:joltvm-agent.jar=tunnelServer=wss://tunnel.example.com:8800/ws/agent,tunnelToken=SECRET1,tunnelTrustCert=/path/ca.pem -jar your-app.jar
 ```
 
 ### 访问远程 Agent
+
+配置了 `--access-token` 时，需通过 `Authorization: Bearer <token>` 或 `?access_token=<token>` 传递。
 
 - **仪表盘**: `http://tunnel-server:8800/`
 - **Agent 列表**: `GET http://tunnel-server:8800/api/tunnel/agents`

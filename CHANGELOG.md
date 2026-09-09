@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-09
+
+### Added
+- **Canonical agent distribution** — New `joltvm-distribution` module produces `joltvm-agent-*-all.jar` with agent, server, Web UI, and relocated dependencies. CLI `attach` embeds this distribution JAR.
+- **Tunnel HTTP authentication** — `--access-token` protects dashboard/proxy APIs using `Authorization: Bearer` or `access_token`; `/api/tunnel/health` remains anonymous.
+- **Tunnel trust configuration** — `tunnelTrustCert` supports private CAs; `tunnelInsecureSkipVerify` is an explicit development-only opt-in.
+- **ClassLoader-aware hot-swap** — `classLoaderId` disambiguates duplicate FQCNs, and compatible primary/inner classes can be redefined as one batch.
+
+### Fixed
+- **Watch `conditionExpr`** — OGNL conditions are evaluated server-side via `OgnlService.evaluateCondition`; Web UI exposes condition input and presets.
+- **Tunnel TLS** — Default JVM trust store; optional `tunnelTrustCert` / explicit `tunnelInsecureSkipVerify` (no longer always-insecure).
+- **WebSocket auth** — Query token validated before upgrade when security is enabled (`WebSocketAuthHandler`).
+- **Stack sampling** — Daemon threads included by default (`includeDaemon`); relative call depth for method traces; flame graph nesting from records.
+- **Tunnel lifecycle** — Re-registration closes stale channels, disconnects cancel pending requests, and client executors/event loops are bounded and shut down.
+
+### Changed
+- CI/release/Docker build and verify the distribution shadow JAR (`:joltvm-distribution:verifyShadowJar`).
+- Server shutdown stops shared services (trace, watch, OGNL, plugins) plus WebSocket subscriptions and tunnel client.
+- Updated project version to 1.1.0.
+
 ## [1.0.0] - 2026-04-16
 
 ### Added

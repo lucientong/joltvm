@@ -34,8 +34,8 @@ import io.netty.handler.stream.ChunkedWriteHandler;
 import com.joltvm.server.handler.StaticFileHandler;
 import com.joltvm.server.security.SecurityConfig;
 import com.joltvm.server.security.TokenService;
-import com.joltvm.server.tracing.MethodTraceService;
 import com.joltvm.server.websocket.SubscriptionManager;
+import com.joltvm.server.websocket.WebSocketAuthHandler;
 import com.joltvm.server.websocket.WebSocketFrameHandler;
 
 import java.io.File;
@@ -199,6 +199,7 @@ public final class JoltVMServer {
                                     new HttpServerCodec(),
                                     new HttpObjectAggregator(MAX_CONTENT_LENGTH),
                                     new ChunkedWriteHandler(),
+                                    new WebSocketAuthHandler(securityConfig, tokenService, "/ws"),
                                     new WebSocketServerProtocolHandler("/ws", null, true),
                                     new WebSocketFrameHandler(subscriptionManager),
                                     new HttpDispatcherHandler(router, staticFileHandler,
@@ -229,15 +230,12 @@ public final class JoltVMServer {
 
         LOG.info("Stopping JoltVM server...");
 
-        // Stop any active tracing/sampling before shutting down Netty threads
-        MethodTraceService traceService = APIRoutes.getTraceService();
-        if (traceService != null) {
-            try {
-                traceService.stopAll();
-                LOG.info("MethodTraceService stopped");
-            } catch (Exception e) {
-                LOG.log(Level.WARNING, "Error stopping MethodTraceService", e);
-            }
+        // Stop shared diagnostic services (trace, watch, OGNL, plugins, …)
+        try {
+            APIRoutes.shutdownServices();
+            LOG.info("Shared API services stopped");
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Error shutting down shared API services", e);
         }
 
         // Stop WebSocket subscriptions

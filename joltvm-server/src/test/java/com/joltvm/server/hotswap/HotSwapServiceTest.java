@@ -321,6 +321,54 @@ class HotSwapServiceTest {
         assertTrue(rollbackable.contains("com.example.B"));
     }
 
+    @Test
+    @DisplayName("hotSwapBatch redefines outer and named inner class")
+    void hotSwapBatchRedefinesInnerClass() {
+        InstrumentationHolder.set(new StubInstrumentation() {
+            @Override
+            public Class[] getAllLoadedClasses() {
+                return new Class[]{String.class, Integer.class};
+            }
+        });
+
+        java.util.Map<String, byte[]> map = new java.util.LinkedHashMap<>();
+        map.put("java.lang.String", new byte[]{1, 2, 3});
+        map.put("java.lang.Integer", new byte[]{4, 5, 6});
+        map.put("com.example.Outer$1", new byte[]{7, 8, 9}); // not loaded → skipped
+
+        HotSwapService.BatchHotSwapResult result = service.hotSwapBatch(
+                map, "java.lang.String", null, null, null, null);
+
+        assertTrue(result.success());
+        assertTrue(result.redefined().contains("java.lang.String"));
+        assertTrue(result.redefined().contains("java.lang.Integer"));
+        assertEquals(1, result.skipped().size());
+        assertEquals("com.example.Outer$1", result.skipped().get(0).get("className"));
+        assertTrue(result.skipped().get(0).get("reason").contains("not loaded"));
+    }
+
+    @Test
+    @DisplayName("hotSwapBatch fails clearly on structural change")
+    void hotSwapBatchFailsOnStructuralChange() {
+        InstrumentationHolder.set(new StubInstrumentation() {
+            @Override
+            public void redefineClasses(ClassDefinition... definitions) {
+                throw new UnsupportedOperationException("attempted to change schema");
+            }
+        });
+
+        java.util.Map<String, byte[]> map = java.util.Map.of(
+                "java.lang.String", new byte[]{1, 2, 3});
+
+        HotSwapService.BatchHotSwapResult result = service.hotSwapBatch(
+                map, "java.lang.String", null, null, null, null);
+
+        assertFalse(result.success());
+        assertTrue(result.message().contains("Structural change"));
+        assertTrue(result.message().contains("add/remove methods or fields"));
+        assertEquals(HotSwapRecord.Status.FAILED, result.primaryRecord().status());
+    }
+
     /**
      * Stub Instrumentation that returns a controlled set of classes.
      * By default, supports redefine and treats all classes as modifiable.

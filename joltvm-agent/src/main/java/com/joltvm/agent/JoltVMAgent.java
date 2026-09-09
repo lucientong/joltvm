@@ -208,13 +208,12 @@ public final class JoltVMAgent {
             serverThread.setDaemon(true);
             serverThread.start();
 
-            // Register shutdown hook
-            Method stopMethod = serverClass.getMethod("stop");
+            // Register shutdown hook — stops server and tunnel client
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 try {
-                    stopMethod.invoke(server);
+                    stopServer();
                 } catch (Exception e) {
-                    LOG.log(Level.WARNING, "Error stopping JoltVM server", e);
+                    LOG.log(Level.WARNING, "Error during JoltVM shutdown", e);
                 }
             }, "joltvm-shutdown"));
 
@@ -225,7 +224,9 @@ public final class JoltVMAgent {
             startTunnelClient(port, agentArgs);
 
         } catch (ClassNotFoundException e) {
-            LOG.info("JoltVM server module not found on classpath, skipping HTTP server startup");
+            LOG.warning("JoltVM server module not found on classpath — HTTP server will NOT start. "
+                    + "Use the canonical fat JAR from :joltvm-distribution "
+                    + "(joltvm-agent-*-all.jar), not the thin joltvm-agent library JAR.");
         } catch (Exception e) {
             LOG.log(Level.SEVERE, "Failed to initialize JoltVM server", e);
         }

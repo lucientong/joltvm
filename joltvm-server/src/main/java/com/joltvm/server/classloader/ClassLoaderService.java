@@ -222,7 +222,7 @@ public class ClassLoaderService {
         return node;
     }
 
-    static String getLoaderId(ClassLoader cl) {
+    public static String getLoaderId(ClassLoader cl) {
         return cl == null ? "bootstrap" : String.valueOf(System.identityHashCode(cl));
     }
 

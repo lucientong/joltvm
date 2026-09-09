@@ -160,6 +160,31 @@ class FlameGraphCollectorTest {
     }
 
     @Test
+    @DisplayName("buildFlameGraphFromRecords nests frames by relative depth")
+    void buildFlameGraphFromRecordsNestsByDepth() {
+        Instant t = Instant.now();
+        // Exit order: child then parent (as Advice records)
+        collector.addRecord(new TraceRecord(
+                "1", "com.example.A", "child", List.of(), List.of(),
+                null, null, null, 2_000_000L, "main", 1L, t, 1));
+        collector.addRecord(new TraceRecord(
+                "2", "com.example.A", "parent", List.of(), List.of(),
+                null, null, null, 5_000_000L, "main", 1L, t.plusMillis(1), 0));
+
+        FlameGraphNode root = collector.buildFlameGraphFromRecords();
+        assertEquals(1, root.getChildren().size());
+        FlameGraphNode parent = root.getChildren().get(0);
+        assertEquals("com.example.A#parent", parent.getName());
+        assertEquals(5000, parent.getValue());
+        assertEquals(1, parent.getChildren().size());
+        FlameGraphNode child = parent.getChildren().get(0);
+        assertEquals("com.example.A#child", child.getName());
+        assertEquals(2000, child.getValue());
+        // Root only sums depth-0 durations
+        assertEquals(5000, root.getValue());
+    }
+
+    @Test
     @DisplayName("buildFlameGraphFromSamples creates tree from stack traces")
     void buildFlameGraphFromSamples() {
         StackTraceElement[] stack = new StackTraceElement[]{

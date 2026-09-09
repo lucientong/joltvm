@@ -22,8 +22,9 @@ import net.bytebuddy.implementation.bytecode.assign.Assigner;
 /**
  * Byte Buddy Advice class for watch method observation.
  *
- * <p>Injected into watched methods to capture invocation details and
- * forward them to the {@link WatchService} for recording.
+ * <p>Injected into watched methods. Performs only lightweight capture and
+ * forwards raw values to {@link WatchService} via a static bridge — never
+ * evaluates OGNL here (Advice may run under the target ClassLoader).
  */
 public class WatchAdvice {
 
@@ -35,42 +36,17 @@ public class WatchAdvice {
     @Advice.OnMethodExit(onThrowable = Throwable.class)
     public static void onExit(
             @Advice.Enter long startTime,
+            @Advice.This(optional = true) Object target,
             @Advice.Return(typing = Assigner.Typing.DYNAMIC) Object returnValue,
             @Advice.Thrown Throwable thrown,
+            @Advice.Origin Class<?> clazz,
             @Advice.Origin("#m") String methodName,
-            @Advice.Origin("#t") String declaringType,
             @Advice.AllArguments Object[] arguments) {
 
         long durationNanos = System.nanoTime() - startTime;
+        String className = clazz != null ? clazz.getName() : null;
 
-        String[] argStrings = null;
-        if (arguments != null) {
-            argStrings = new String[arguments.length];
-            for (int i = 0; i < arguments.length; i++) {
-                argStrings[i] = truncate(safeToString(arguments[i]), 200);
-            }
-        }
-
-        String returnStr = (thrown == null && returnValue != null)
-                ? truncate(safeToString(returnValue), 200) : null;
-        String exType = thrown != null ? thrown.getClass().getName() : null;
-        String exMsg = thrown != null ? truncate(safeToString(thrown.getMessage()), 200) : null;
-
-        WatchService.recordInvocation(declaringType, methodName,
-                argStrings, returnStr, exType, exMsg, durationNanos);
-    }
-
-    private static String safeToString(Object obj) {
-        if (obj == null) return "null";
-        try {
-            return obj.toString();
-        } catch (Exception e) {
-            return obj.getClass().getName() + "@" + Integer.toHexString(System.identityHashCode(obj));
-        }
-    }
-
-    private static String truncate(String str, int maxLen) {
-        if (str == null) return null;
-        return str.length() > maxLen ? str.substring(0, maxLen) + "..." : str;
+        WatchService.recordInvocation(className, methodName,
+                arguments, returnValue, thrown, target, clazz, durationNanos);
     }
 }

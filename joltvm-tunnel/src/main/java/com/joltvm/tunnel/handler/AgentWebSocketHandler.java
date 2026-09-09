@@ -143,6 +143,8 @@ public class AgentWebSocketHandler extends SimpleChannelInboundHandler<WebSocket
         AgentRegistry.AgentInfo removed = registry.unregisterByChannel(ctx.channel());
         if (removed != null) {
             LOG.info("Agent disconnected: " + removed.agentId());
+            correlator.cancelForAgent(removed.agentId(),
+                    "agent disconnected: " + removed.agentId());
         }
         ctx.fireChannelInactive();
     }

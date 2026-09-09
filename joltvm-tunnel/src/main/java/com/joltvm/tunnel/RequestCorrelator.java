@@ -16,6 +16,8 @@
 
 package com.joltvm.tunnel;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,7 +31,8 @@ import java.util.logging.Logger;
  *
  * <p>When the tunnel server sends a request to an agent, a {@link CompletableFuture}
  * is stored keyed by requestId. When the agent sends back a response, the future
- * is completed. Stale requests are automatically timed out.
+ * is completed. Stale requests are automatically timed out. On agent disconnect,
+ * pending requests for that agent can be cancelled via {@link #cancelForAgent}.
  */
 public class RequestCorrelator {
 
@@ -57,8 +60,13 @@ public class RequestCorrelator {
         }
     }
 
-    /** requestId → pending future. */
-    private final ConcurrentHashMap<String, CompletableFuture<ProxiedResponse>> pendingRequests
+    private record PendingRequest(
+            CompletableFuture<ProxiedResponse> future,
+            String agentId
+    ) {}
+
+    /** requestId → pending request. */
+    private final ConcurrentHashMap<String, PendingRequest> pendingRequests
             = new ConcurrentHashMap<>();
 
     /**
@@ -69,8 +77,19 @@ public class RequestCorrelator {
      * @return a future that will hold the proxied response
      */
     public CompletableFuture<ProxiedResponse> registerRequest(String requestId) {
+        return registerRequest(requestId, null);
+    }
+
+    /**
+     * Registers a pending request associated with an agent.
+     *
+     * @param requestId the unique request ID
+     * @param agentId   the agent that should answer (may be null)
+     * @return a future that will hold the proxied response
+     */
+    public CompletableFuture<ProxiedResponse> registerRequest(String requestId, String agentId) {
         CompletableFuture<ProxiedResponse> future = new CompletableFuture<>();
-        pendingRequests.put(requestId, future);
+        pendingRequests.put(requestId, new PendingRequest(future, agentId));
 
         // Auto-timeout
         future.orTimeout(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -92,9 +111,9 @@ public class RequestCorrelator {
      * @return true if a pending request was found and completed
      */
     public boolean completeRequest(String requestId, ProxiedResponse response) {
-        CompletableFuture<ProxiedResponse> future = pendingRequests.remove(requestId);
-        if (future != null) {
-            return future.complete(response);
+        PendingRequest pending = pendingRequests.remove(requestId);
+        if (pending != null) {
+            return pending.future().complete(response);
         }
         LOG.log(Level.FINE, "No pending request for ID: {0}", requestId);
         return false;
@@ -103,11 +122,36 @@ public class RequestCorrelator {
     /**
      * Cancels all pending requests for a given agent (e.g., on disconnect).
      *
+     * @param agentId the agent ID
+     * @param reason  the cancellation reason
+     */
+    public void cancelForAgent(String agentId, String reason) {
+        if (agentId == null) {
+            return;
+        }
+        List<String> toCancel = new ArrayList<>();
+        for (Map.Entry<String, PendingRequest> entry : pendingRequests.entrySet()) {
+            if (agentId.equals(entry.getValue().agentId())) {
+                toCancel.add(entry.getKey());
+            }
+        }
+        for (String requestId : toCancel) {
+            PendingRequest pending = pendingRequests.remove(requestId);
+            if (pending != null) {
+                pending.future().completeExceptionally(
+                        new RuntimeException("Request cancelled: " + reason));
+            }
+        }
+    }
+
+    /**
+     * Cancels all pending requests (e.g., on server shutdown).
+     *
      * @param reason the cancellation reason
      */
     public void cancelAll(String reason) {
-        for (Map.Entry<String, CompletableFuture<ProxiedResponse>> entry : pendingRequests.entrySet()) {
-            entry.getValue().completeExceptionally(
+        for (Map.Entry<String, PendingRequest> entry : pendingRequests.entrySet()) {
+            entry.getValue().future().completeExceptionally(
                     new RuntimeException("Request cancelled: " + reason));
         }
         pendingRequests.clear();

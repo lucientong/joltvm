@@ -17,7 +17,10 @@
 package com.joltvm.server.tunnel;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -42,6 +45,8 @@ class TunnelClientTest {
         assertNotNull(client);
         assertEquals("my-agent", client.getAgentId());
         assertFalse(client.isConnected());
+        assertFalse(client.isInsecureSkipVerify());
+        assertNull(client.getTrustCertPath());
     }
 
     @Test
@@ -70,5 +75,48 @@ class TunnelClientTest {
         args.put("tunnelServer", "  ");
 
         assertNull(TunnelClient.fromAgentArgs(args, 7758));
+    }
+
+    @Test
+    void testFromAgentArgsTlsOptions() {
+        Map<String, String> args = new HashMap<>();
+        args.put("tunnelServer", "wss://tunnel.example.com/ws/agent");
+        args.put("tunnelTrustCert", "/path/ca.pem");
+        args.put("tunnelInsecureSkipVerify", "true");
+
+        TunnelClient client = TunnelClient.fromAgentArgs(args, 7758);
+        assertNotNull(client);
+        assertEquals("/path/ca.pem", client.getTrustCertPath());
+        assertTrue(client.isInsecureSkipVerify());
+    }
+
+    @Test
+    void testBuildSslContextDefaultTrust() throws Exception {
+        TunnelClient client = new TunnelClient(
+                "wss://example.com/ws", "a1", "", 7758, null, false);
+        assertNotNull(client.buildSslContext());
+    }
+
+    @Test
+    void testBuildSslContextInsecure() throws Exception {
+        TunnelClient client = new TunnelClient(
+                "wss://example.com/ws", "a1", "", 7758, null, true);
+        assertNotNull(client.buildSslContext());
+    }
+
+    @Test
+    void testBuildSslContextMissingTrustCert() {
+        TunnelClient client = new TunnelClient(
+                "wss://example.com/ws", "a1", "", 7758, "/no/such/ca.pem", false);
+        assertThrows(IllegalArgumentException.class, client::buildSslContext);
+    }
+
+    @Test
+    void testBuildSslContextInvalidPem(@TempDir Path dir) throws Exception {
+        Path pem = dir.resolve("ca.pem");
+        Files.writeString(pem, "not-a-real-pem");
+        TunnelClient client = new TunnelClient(
+                "wss://example.com/ws", "a1", "", 7758, pem.toString(), false);
+        assertThrows(Exception.class, client::buildSslContext);
     }
 }

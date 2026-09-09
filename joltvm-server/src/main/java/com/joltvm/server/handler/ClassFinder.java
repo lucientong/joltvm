@@ -16,15 +16,14 @@
 
 package com.joltvm.server.handler;
 
-import com.joltvm.agent.InstrumentationHolder;
-
-import java.lang.instrument.Instrumentation;
+import com.joltvm.server.classloader.AmbiguousClassException;
+import com.joltvm.server.classloader.LoadedClassResolver;
 
 /**
  * Utility class for finding loaded classes via the Instrumentation API.
  *
- * <p>Used by {@link ClassDetailHandler} and {@link ClassSourceHandler} to
- * locate a class by its fully qualified name among all loaded classes.
+ * <p>Used by {@link ClassDetailHandler}, {@link ClassSourceHandler}, and hot-swap
+ * paths to locate a class by FQCN, optionally disambiguated by ClassLoader id.
  */
 final class ClassFinder {
 
@@ -35,16 +34,26 @@ final class ClassFinder {
     /**
      * Finds a loaded class by its fully qualified name.
      *
+     * <p>If multiple ClassLoaders define the same name, throws
+     * {@link AmbiguousClassException} — callers should return HTTP 409.
+     *
      * @param className the fully qualified class name (e.g., {@code java.lang.String})
      * @return the class, or {@code null} if not found among loaded classes
+     * @throws AmbiguousClassException if multiple loaders match
      */
     static Class<?> findClass(String className) {
-        Instrumentation inst = InstrumentationHolder.get();
-        for (Class<?> clazz : inst.getAllLoadedClasses()) {
-            if (clazz.getName().equals(className)) {
-                return clazz;
-            }
-        }
-        return null;
+        return findClass(className, null);
+    }
+
+    /**
+     * Finds a loaded class by name and optional ClassLoader id.
+     *
+     * @param className     fully qualified class name
+     * @param classLoaderId optional loader identity hash, or null for unique-match mode
+     * @return the class, or {@code null} if not found
+     * @throws AmbiguousClassException if multiple loaders match and no id was given
+     */
+    static Class<?> findClass(String className, String classLoaderId) {
+        return LoadedClassResolver.resolve(className, classLoaderId);
     }
 }

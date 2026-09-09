@@ -19,9 +19,12 @@ package com.joltvm.server.handler;
 import com.joltvm.agent.InstrumentationHolder;
 import com.joltvm.server.HttpResponseHelper;
 import com.joltvm.server.RouteHandler;
+import com.joltvm.server.classloader.AmbiguousClassException;
+import com.joltvm.server.classloader.ClassLoaderService;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.QueryStringDecoder;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -35,6 +38,9 @@ import java.util.logging.Logger;
 
 /**
  * Handler for {@code GET /api/classes/{className}} — returns detailed info about a class.
+ *
+ * <p>Optional query parameter {@code classLoaderId} disambiguates when the same FQCN
+ * is loaded by multiple ClassLoaders (HTTP 409 + candidates on conflict).
  *
  * <p>Response includes:
  * <ul>
@@ -59,14 +65,34 @@ public final class ClassDetailHandler implements RouteHandler {
                     "Instrumentation not available");
         }
 
-        // Find the class among loaded classes
-        Class<?> targetClass = ClassFinder.findClass(className);
-        if (targetClass == null) {
-            return HttpResponseHelper.notFound("Class not found: " + className);
-        }
+        QueryStringDecoder decoder = new QueryStringDecoder(request.uri());
+        String classLoaderId = getParam(decoder, "classLoaderId");
 
-        Map<String, Object> detail = buildClassDetail(targetClass);
-        return HttpResponseHelper.json(detail);
+        try {
+            Class<?> targetClass = ClassFinder.findClass(className, classLoaderId);
+            if (targetClass == null) {
+                return HttpResponseHelper.notFound("Class not found: " + className
+                        + (classLoaderId != null ? " (classLoaderId=" + classLoaderId + ")" : ""));
+            }
+
+            Map<String, Object> detail = buildClassDetail(targetClass);
+            return HttpResponseHelper.json(detail);
+        } catch (AmbiguousClassException e) {
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("error", e.getMessage());
+            response.put("className", e.getClassName());
+            response.put("candidates", e.getCandidates());
+            return HttpResponseHelper.json(HttpResponseStatus.CONFLICT, response);
+        }
+    }
+
+    private static String getParam(QueryStringDecoder decoder, String key) {
+        List<String> values = decoder.parameters().get(key);
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        String v = values.get(0);
+        return (v == null || v.isBlank()) ? null : v;
     }
 
     private static Map<String, Object> buildClassDetail(Class<?> clazz) {
@@ -82,20 +108,17 @@ public final class ClassDetailHandler implements RouteHandler {
         detail.put("annotation", clazz.isAnnotation());
         detail.put("enum", clazz.isEnum());
 
-        // Superclass chain
         Class<?> superclass = clazz.getSuperclass();
         detail.put("superclass", superclass != null ? superclass.getName() : null);
 
-        // Interfaces
         detail.put("interfaces", Arrays.stream(clazz.getInterfaces())
                 .map(Class::getName)
                 .toList());
 
-        // ClassLoader
         ClassLoader cl = clazz.getClassLoader();
         detail.put("classLoader", cl != null ? cl.toString() : "bootstrap");
+        detail.put("classLoaderId", ClassLoaderService.getLoaderId(cl));
 
-        // Fields
         List<Map<String, Object>> fieldList = new ArrayList<>();
         try {
             for (Field field : clazz.getDeclaredFields()) {
@@ -110,7 +133,6 @@ public final class ClassDetailHandler implements RouteHandler {
         }
         detail.put("fields", fieldList);
 
-        // Methods
         List<Map<String, Object>> methodList = new ArrayList<>();
         try {
             for (Method method : clazz.getDeclaredMethods()) {

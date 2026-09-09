@@ -31,6 +31,7 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 
+import java.io.File;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -57,6 +58,8 @@ import java.util.logging.Logger;
  *   <li>{@code tunnelServer} — tunnel server URL (e.g., wss://tunnel.example.com:8800/ws/agent)</li>
  *   <li>{@code tunnelToken} — pre-shared registration token</li>
  *   <li>{@code tunnelAgentId} — custom agent ID (default: hostname-pid)</li>
+ *   <li>{@code tunnelTrustCert} — path to a custom CA / trust PEM file</li>
+ *   <li>{@code tunnelInsecureSkipVerify} — {@code true} to skip TLS verification (explicit opt-in)</li>
  * </ul>
  */
 public class TunnelClient {
@@ -76,11 +79,14 @@ public class TunnelClient {
     private static final int HEARTBEAT_INTERVAL_SECONDS = 30;
     private static final int MAX_RECONNECT_DELAY_SECONDS = 30;
     private static final int MAX_CONTENT_LENGTH = 10 * 1024 * 1024;
+    private static final int PROXY_POOL_SIZE = 4;
 
     private final String tunnelServerUrl;
     private final String agentId;
     private final String token;
     private final int localPort;
+    private final String trustCertPath;
+    private final boolean insecureSkipVerify;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean connected = new AtomicBoolean(false);
@@ -89,9 +95,10 @@ public class TunnelClient {
     private EventLoopGroup group;
     private Channel channel;
     private ScheduledExecutorService scheduler;
+    private ExecutorService proxyExecutor;
 
     /**
-     * Creates a tunnel client.
+     * Creates a tunnel client with JVM default TLS trust.
      *
      * @param tunnelServerUrl the tunnel server WebSocket URL
      * @param agentId         the agent identifier
@@ -99,10 +106,27 @@ public class TunnelClient {
      * @param localPort       the local JoltVM server port (for proxying)
      */
     public TunnelClient(String tunnelServerUrl, String agentId, String token, int localPort) {
+        this(tunnelServerUrl, agentId, token, localPort, null, false);
+    }
+
+    /**
+     * Creates a tunnel client with optional TLS trust configuration.
+     *
+     * @param tunnelServerUrl     the tunnel server WebSocket URL
+     * @param agentId             the agent identifier
+     * @param token               the registration token
+     * @param localPort           the local JoltVM server port (for proxying)
+     * @param trustCertPath       path to a custom CA PEM, or null for JVM defaults
+     * @param insecureSkipVerify  when true, skip certificate verification (explicit opt-in)
+     */
+    public TunnelClient(String tunnelServerUrl, String agentId, String token, int localPort,
+                        String trustCertPath, boolean insecureSkipVerify) {
         this.tunnelServerUrl = tunnelServerUrl;
         this.agentId = agentId;
         this.token = token;
         this.localPort = localPort;
+        this.trustCertPath = trustCertPath;
+        this.insecureSkipVerify = insecureSkipVerify;
     }
 
     /**
@@ -119,7 +143,13 @@ public class TunnelClient {
         }
         String token = agentArgs.getOrDefault("tunnelToken", "");
         String agentId = agentArgs.getOrDefault("tunnelAgentId", generateDefaultAgentId());
-        return new TunnelClient(serverUrl, agentId, token, localPort);
+        String trustCert = agentArgs.get("tunnelTrustCert");
+        if (trustCert != null && trustCert.isBlank()) {
+            trustCert = null;
+        }
+        boolean insecure = "true".equalsIgnoreCase(
+                agentArgs.getOrDefault("tunnelInsecureSkipVerify", "false"));
+        return new TunnelClient(serverUrl, agentId, token, localPort, trustCert, insecure);
     }
 
     /**
@@ -131,8 +161,20 @@ public class TunnelClient {
             return;
         }
 
+        group = new NioEventLoopGroup(1, r -> {
+            Thread t = new Thread(r, "joltvm-tunnel-io");
+            t.setDaemon(true);
+            return t;
+        });
+
         scheduler = Executors.newScheduledThreadPool(2, r -> {
             Thread t = new Thread(r, "joltvm-tunnel");
+            t.setDaemon(true);
+            return t;
+        });
+
+        proxyExecutor = Executors.newFixedThreadPool(PROXY_POOL_SIZE, r -> {
+            Thread t = new Thread(r, "joltvm-tunnel-proxy");
             t.setDaemon(true);
             return t;
         });
@@ -155,12 +197,19 @@ public class TunnelClient {
         LOG.info("Stopping tunnel client...");
         if (scheduler != null) {
             scheduler.shutdownNow();
+            scheduler = null;
+        }
+        if (proxyExecutor != null) {
+            proxyExecutor.shutdownNow();
+            proxyExecutor = null;
         }
         if (channel != null && channel.isActive()) {
             channel.close();
         }
+        channel = null;
         if (group != null) {
             group.shutdownGracefully();
+            group = null;
         }
         connected.set(false);
         LOG.info("Tunnel client stopped");
@@ -168,9 +217,60 @@ public class TunnelClient {
 
     public boolean isConnected() { return connected.get(); }
     public String getAgentId() { return agentId; }
+    public String getTrustCertPath() { return trustCertPath; }
+    public boolean isInsecureSkipVerify() { return insecureSkipVerify; }
+
+    /**
+     * Builds the client SSL context for wss connections.
+     *
+     * <p>Default uses the JVM trust store. Custom CA via {@code trustCertPath}.
+     * Insecure mode requires explicit opt-in and logs a warning.
+     */
+    SslContext buildSslContext() throws Exception {
+        if (insecureSkipVerify) {
+            LOG.warning("tunnelInsecureSkipVerify=true — TLS certificate verification is DISABLED. "
+                    + "Use only for development; prefer tunnelTrustCert for custom CAs.");
+            return SslContextBuilder.forClient()
+                    .trustManager(InsecureTrustManagerFactory.INSTANCE)
+                    .build();
+        }
+        if (trustCertPath != null) {
+            File certFile = new File(trustCertPath);
+            if (!certFile.isFile()) {
+                throw new IllegalArgumentException(
+                        "tunnelTrustCert file not found: " + trustCertPath);
+            }
+            return SslContextBuilder.forClient()
+                    .trustManager(certFile)
+                    .build();
+        }
+        // JVM default trust store
+        return SslContextBuilder.forClient().build();
+    }
 
     private void connect() {
         if (!running.get()) return;
+
+        // Close any leftover channel before reconnecting (keeps the shared EventLoopGroup)
+        if (channel != null) {
+            Channel old = channel;
+            channel = null;
+            if (old.isActive()) {
+                old.close();
+            }
+        }
+
+        // Ensure a single reusable EventLoopGroup (recreate only if previously shut down)
+        if (group == null || group.isShuttingDown() || group.isShutdown()) {
+            if (group != null && !group.isTerminated()) {
+                group.shutdownGracefully();
+            }
+            group = new NioEventLoopGroup(1, r -> {
+                Thread t = new Thread(r, "joltvm-tunnel-io");
+                t.setDaemon(true);
+                return t;
+            });
+        }
 
         try {
             URI uri = new URI(tunnelServerUrl);
@@ -181,18 +281,8 @@ public class TunnelClient {
                 port = "wss".equals(scheme) ? 443 : 80;
             }
 
-            boolean ssl = "wss".equals(scheme);
-            SslContext sslContext = ssl
-                    ? SslContextBuilder.forClient()
-                        .trustManager(InsecureTrustManagerFactory.INSTANCE)
-                        .build()
-                    : null;
-
-            group = new NioEventLoopGroup(1, r -> {
-                Thread t = new Thread(r, "joltvm-tunnel-io");
-                t.setDaemon(true);
-                return t;
-            });
+            boolean ssl = "wss".equalsIgnoreCase(scheme);
+            SslContext sslContext = ssl ? buildSslContext() : null;
 
             WebSocketClientHandshaker handshaker = WebSocketClientHandshakerFactory.newHandshaker(
                     uri, WebSocketVersion.V13, null, true, new DefaultHttpHeaders());
@@ -307,8 +397,8 @@ public class TunnelClient {
             return;
         }
 
-        // Execute in a thread pool to avoid blocking the I/O thread
-        CompletableFuture.runAsync(() -> {
+        Executor executor = proxyExecutor != null ? proxyExecutor : Runnable::run;
+        executor.execute(() -> {
             try {
                 // Build URL to local server
                 String url = "http://localhost:" + localPort + path;
@@ -422,11 +512,10 @@ public class TunnelClient {
         public void channelInactive(ChannelHandlerContext ctx) {
             connected.set(false);
             LOG.info("Disconnected from tunnel server");
-            if (group != null) {
-                group.shutdownGracefully();
-                group = null;
+            // Keep the shared EventLoopGroup; only schedule reconnect while still running
+            if (running.get()) {
+                scheduleReconnect();
             }
-            scheduleReconnect();
         }
 
         @Override

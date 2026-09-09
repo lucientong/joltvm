@@ -6,8 +6,8 @@ const WatchPanel = (() => {
     'use strict';
 
     const PRESETS = [
-        { label: 'Slow methods (>1s)', classPattern: '', methodPattern: '*', conditionExpr: '', durationMs: 120000 },
-        { label: 'All exceptions', classPattern: '', methodPattern: '*', conditionExpr: '', durationMs: 60000 },
+        { label: 'Slow methods (>1ms)', classPattern: '', methodPattern: '*', conditionExpr: '#cost > 1000000', durationMs: 120000 },
+        { label: 'All exceptions', classPattern: '', methodPattern: '*', conditionExpr: '#throwExp != null', durationMs: 60000 },
     ];
 
     async function loadWatches() {
@@ -30,16 +30,18 @@ const WatchPanel = (() => {
             return;
         }
 
-        let html = '<table class="data-table"><thead><tr><th>ID</th><th>Class</th><th>Method</th><th>Records</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+        let html = '<table class="data-table"><thead><tr><th>ID</th><th>Class</th><th>Method</th><th>Condition</th><th>Records</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
         for (const w of data.watches) {
             const status = w.active ? '<span class="badge badge-green">Active</span>'
                 : w.expired ? '<span class="badge badge-yellow">Expired</span>'
                 : '<span class="badge badge-red">Stopped</span>';
+            const cond = w.conditionExpr ? esc(truncate(w.conditionExpr, 28)) : '-';
             html += `<tr>
                 <td><code>${esc(w.id)}</code></td>
                 <td title="${esc(w.classPattern)}">${esc(truncate(w.classPattern, 40))}</td>
                 <td>${esc(w.methodPattern)}</td>
-                <td>${w.recordCount} / ${w.maxRecords}</td>
+                <td title="${esc(w.conditionExpr || '')}">${cond}</td>
+                <td>${w.recordCount} / ${w.maxRecords}${w.totalSeen != null ? ` <small>(seen ${w.totalSeen})</small>` : ''}</td>
                 <td>${status}</td>
                 <td>
                     <button class="btn btn-sm watch-records-btn" data-id="${w.id}">Records</button>
@@ -96,6 +98,7 @@ const WatchPanel = (() => {
     async function startWatch() {
         const classPattern = document.getElementById('watchClassPattern').value.trim();
         const methodPattern = document.getElementById('watchMethodPattern').value.trim() || '*';
+        const conditionExpr = document.getElementById('watchConditionExpr')?.value.trim() || null;
         const durationMs = parseInt(document.getElementById('watchDuration').value) * 1000 || 60000;
 
         if (!classPattern) {
@@ -103,11 +106,23 @@ const WatchPanel = (() => {
             return;
         }
 
-        const res = await JoltAPI.watchStart(classPattern, methodPattern, null, 1000, durationMs);
+        const res = await JoltAPI.watchStart(classPattern, methodPattern, conditionExpr || null, 1000, durationMs);
         if (res.ok) {
             loadWatches();
         } else {
             alert('Failed: ' + (res.data?.error || res.data));
+        }
+    }
+
+    function applyPreset(preset) {
+        if (preset.classPattern) {
+            document.getElementById('watchClassPattern').value = preset.classPattern;
+        }
+        document.getElementById('watchMethodPattern').value = preset.methodPattern || '*';
+        const condEl = document.getElementById('watchConditionExpr');
+        if (condEl) condEl.value = preset.conditionExpr || '';
+        if (preset.durationMs) {
+            document.getElementById('watchDuration').value = Math.round(preset.durationMs / 1000);
         }
     }
 
@@ -125,6 +140,23 @@ const WatchPanel = (() => {
     function init() {
         document.getElementById('watchStartBtn')?.addEventListener('click', startWatch);
         document.getElementById('watchRefresh')?.addEventListener('click', loadWatches);
+
+        const toolbar = document.querySelector('#view-watch .toolbar');
+        if (toolbar && !document.getElementById('watchPresets')) {
+            const wrap = document.createElement('span');
+            wrap.id = 'watchPresets';
+            wrap.style.marginLeft = '8px';
+            for (const p of PRESETS) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-sm';
+                btn.textContent = p.label;
+                btn.title = p.conditionExpr || '';
+                btn.addEventListener('click', () => applyPreset(p));
+                wrap.appendChild(btn);
+            }
+            toolbar.appendChild(wrap);
+        }
     }
 
     return { init, loadWatches };

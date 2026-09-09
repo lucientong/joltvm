@@ -146,9 +146,18 @@ class BytecodeBackupServiceTest {
 
         assertTrue(created);
         assertTrue(service.hasBackup("java.lang.String"));
+        assertTrue(service.hasBackup(BytecodeBackupService.backupKey(String.class)));
 
         Optional<byte[]> backup = service.getBackup("java.lang.String");
         assertTrue(backup.isPresent());
         assertTrue(backup.get().length > 0);
+    }
+
+    @Test
+    @DisplayName("backup key uses loaderId::className")
+    void backupKeyUsesLoaderId() {
+        String key = BytecodeBackupService.backupKey(String.class);
+        assertTrue(key.contains("::"));
+        assertTrue(key.endsWith("java.lang.String"));
     }
 }

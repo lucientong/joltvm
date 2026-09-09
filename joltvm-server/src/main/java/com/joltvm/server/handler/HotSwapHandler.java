@@ -22,6 +22,7 @@ import com.github.difflib.patch.Patch;
 import com.joltvm.agent.InstrumentationHolder;
 import com.joltvm.server.HttpResponseHelper;
 import com.joltvm.server.RouteHandler;
+import com.joltvm.server.classloader.AmbiguousClassException;
 import com.joltvm.server.compile.CompileResult;
 import com.joltvm.server.compile.InMemoryCompiler;
 import com.joltvm.server.decompile.DecompileService;
@@ -44,18 +45,19 @@ import java.util.logging.Logger;
 /**
  * Handler for {@code POST /api/hotswap} — compiles source code and applies hot-swap.
  *
- * <p>This handler performs the full hot-swap pipeline:
- * <ol>
- *   <li>Compile source code in memory</li>
- *   <li>Backup original bytecode</li>
- *   <li>Redefine the class with new bytecode</li>
- * </ol>
+ * <p>After compile, all classes in the bytecode map that are already loaded and
+ * structurally redefinable are redefined in a single atomic
+ * {@code Instrumentation.redefineClasses} call (outer + named inner classes).
+ * Unloaded companions (e.g. anonymous {@code $1}) are listed under {@code skipped}.
  *
- * <p>Expects a JSON request body:
+ * <p>Optional {@code classLoaderId} disambiguates when the same FQCN is loaded by
+ * multiple ClassLoaders (HTTP 409 + candidates on conflict).
+ *
  * <pre>
  * {
  *   "className": "com.example.MyClass",
- *   "sourceCode": "package com.example;\n\npublic class MyClass { ... }"
+ *   "sourceCode": "package com.example;\n\npublic class MyClass { ... }",
+ *   "classLoaderId": "12345678"   // optional
  * }
  * </pre>
  */
@@ -91,7 +93,6 @@ public class HotSwapHandler implements RouteHandler {
                     "Instrumentation not available");
         }
 
-        // Parse JSON body
         String body = request.content().toString(StandardCharsets.UTF_8);
         if (body.isBlank()) {
             return HttpResponseHelper.error(HttpResponseStatus.BAD_REQUEST,
@@ -109,8 +110,11 @@ public class HotSwapHandler implements RouteHandler {
         String className = (String) bodyMap.get("className");
         String sourceCode = (String) bodyMap.get("sourceCode");
         String reason = bodyMap.get("reason") instanceof String r ? r : null;
+        String classLoaderId = bodyMap.get("classLoaderId") instanceof String id ? id : null;
+        if (classLoaderId != null && classLoaderId.isBlank()) {
+            classLoaderId = null;
+        }
 
-        // Extract operator from Authorization header (if token-based auth is used)
         String operator = extractOperator(request);
 
         if (className == null || className.isBlank()) {
@@ -123,7 +127,6 @@ public class HotSwapHandler implements RouteHandler {
         }
 
         try {
-            // Step 1: Compile
             CompileResult compileResult = compiler.compile(className, sourceCode);
             if (!compileResult.success()) {
                 Map<String, Object> response = new LinkedHashMap<>();
@@ -134,64 +137,65 @@ public class HotSwapHandler implements RouteHandler {
                 return HttpResponseHelper.json(HttpResponseStatus.UNPROCESSABLE_ENTITY, response);
             }
 
-            // Step 2: Get bytecode for the target class
-            byte[] newBytecode = compileResult.bytecodeMap().get(className);
-            if (newBytecode == null) {
-                // Try to find with simple class name (inner class might have different key)
-                for (Map.Entry<String, byte[]> entry : compileResult.bytecodeMap().entrySet()) {
-                    if (entry.getKey().endsWith(className.substring(className.lastIndexOf('.') + 1))) {
-                        newBytecode = entry.getValue();
-                        break;
-                    }
-                }
-            }
-            if (newBytecode == null) {
+            Map<String, byte[]> bytecodeMap = compileResult.bytecodeMap();
+            if (bytecodeMap.isEmpty()) {
                 return HttpResponseHelper.error(HttpResponseStatus.INTERNAL_SERVER_ERROR,
-                        "Compilation succeeded but no bytecode found for " + className);
+                        "Compilation succeeded but no bytecode was produced");
             }
 
-            // Step 3: Generate unified source diff (best-effort, non-blocking)
-            String diff = generateDiff(className, sourceCode, hotSwapService);
+            String diff = generateDiff(className, sourceCode, hotSwapService, classLoaderId);
 
-            // Step 4: Hot-swap (pass pre-computed diff)
-            HotSwapRecord record = hotSwapService.hotSwap(className, newBytecode, operator, reason, diff);
+            HotSwapService.BatchHotSwapResult batch = hotSwapService.hotSwapBatch(
+                    bytecodeMap, className, classLoaderId, operator, reason, diff);
 
-            // Record to audit log if available
+            HotSwapRecord record = batch.primaryRecord();
             AuditLogService auditLogService = com.joltvm.server.APIRoutes.getAuditLogService();
             if (auditLogService != null) {
                 auditLogService.record(record);
             }
 
             Map<String, Object> response = new LinkedHashMap<>();
-            response.put("success", record.status() == HotSwapRecord.Status.SUCCESS);
+            response.put("success", batch.success());
             response.put("phase", "hotswap");
             response.put("className", className);
             response.put("action", record.action().name());
-            response.put("message", record.message());
+            response.put("message", batch.message());
             response.put("recordId", record.id());
             response.put("timestamp", record.timestamp().toString());
+            response.put("redefined", batch.redefined());
+            response.put("skipped", batch.skipped());
+            if (classLoaderId != null) {
+                response.put("classLoaderId", classLoaderId);
+            }
 
-            if (record.status() == HotSwapRecord.Status.SUCCESS) {
+            if (batch.success()) {
                 return HttpResponseHelper.json(response);
             } else {
                 return HttpResponseHelper.json(HttpResponseStatus.INTERNAL_SERVER_ERROR, response);
             }
 
+        } catch (AmbiguousClassException e) {
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("success", false);
+            response.put("error", e.getMessage());
+            response.put("className", e.getClassName());
+            response.put("candidates", e.getCandidates());
+            return HttpResponseHelper.json(HttpResponseStatus.CONFLICT, response);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Hot-swap error for " + className, e);
             return HttpResponseHelper.serverError("Hot-swap failed due to an internal error.");
         }
     }
 
-    /**
-     * Generates a unified diff between the original (decompiled) source and the new source.
-     *
-     * <p>Returns {@code null} on any error — diff is purely informational and must not
-     * block or fail the hot-swap operation.
-     */
-    private static String generateDiff(String className, String newSource, HotSwapService hotSwapService) {
+    private static String generateDiff(String className, String newSource,
+                                        HotSwapService hotSwapService, String classLoaderId) {
         try {
-            Optional<byte[]> backup = hotSwapService.getBackupService().getBackup(className);
+            Optional<byte[]> backup = classLoaderId != null
+                    ? hotSwapService.getBackupService().getBackup(classLoaderId, className)
+                    : Optional.empty();
+            if (backup.isEmpty()) {
+                backup = hotSwapService.getBackupService().getBackup(className);
+            }
             if (backup.isEmpty()) {
                 return null;
             }
@@ -216,13 +220,6 @@ public class HotSwapHandler implements RouteHandler {
         }
     }
 
-    /**
-     * Extracts the operator username from the Authorization Bearer token
-     * by delegating to {@link com.joltvm.server.security.TokenService}.
-     *
-     * <p>Validates the token (HMAC + expiration) before extracting the username.
-     * Returns {@code null} if no valid token is present or security is disabled.
-     */
     private String extractOperator(FullHttpRequest request) {
         if (tokenService == null) {
             return null;

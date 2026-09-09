@@ -137,6 +137,9 @@
                 <button class="btn" id="flameClearSearchBtn" title="Clear search">&#x2715;</button>
             </div>
             <div class="trace-status" id="traceStatus"></div>
+            <p class="status-msg" style="margin:0 0 8px;font-size:12px;opacity:0.85">
+                JDK stack sampling (CPU view) has safepoint bias. Prefer async-profiler below for production-accurate CPU/alloc profiles.
+            </p>
             <div class="flamegraph-container" id="flamegraphContainer">
                 <div class="placeholder-msg">Start a trace to generate flame graph data</div>
             </div>
@@ -285,6 +288,7 @@
             <div class="toolbar">
                 <input type="text" class="search-input" id="watchClassPattern" placeholder="Class name (e.g., com.example.MyService)" style="width:280px">
                 <input type="text" class="search-input" id="watchMethodPattern" placeholder="Method (* for all)" style="width:160px">
+                <input type="text" class="search-input" id="watchConditionExpr" placeholder="Condition (e.g., #cost &gt; 1000000)" style="width:220px" title="OGNL: #args #returnObj #throwExp #cost #target #clazz">
                 <label>Duration: <input type="number" class="search-input" id="watchDuration" value="60" min="1" max="300" style="width:60px">s</label>
                 <button class="btn btn-primary" id="watchStartBtn">New Watch</button>
                 <button class="btn" id="watchRefresh">Refresh</button>

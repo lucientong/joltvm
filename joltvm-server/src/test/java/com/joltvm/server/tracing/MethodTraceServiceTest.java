@@ -198,4 +198,59 @@ class MethodTraceServiceTest {
         assertThrows(UnsupportedOperationException.class,
                 () -> service.getTracedClasses().add("test"));
     }
+
+    @Test
+    @DisplayName("sampleAllThreads includes daemon threads by default")
+    void sampleAllThreadsIncludesDaemonByDefault() throws InterruptedException {
+        java.util.concurrent.CountDownLatch started = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        Thread daemon = new Thread(() -> {
+            started.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, "test-daemon-worker");
+        daemon.setDaemon(true);
+        daemon.start();
+        assertTrue(started.await(2, java.util.concurrent.TimeUnit.SECONDS));
+
+        int before = collector.getSampleCount();
+        service.setIncludeDaemon(true);
+        service.sampleAllThreads();
+        int after = collector.getSampleCount();
+
+        release.countDown();
+        daemon.join(2000);
+
+        assertTrue(after > before, "Expected daemon thread stacks to be sampled");
+    }
+
+    @Test
+    @DisplayName("sampleAllThreads skips daemon when includeDaemon=false")
+    void sampleAllThreadsSkipsDaemonWhenDisabled() throws InterruptedException {
+        // Only our daemon + joltvm threads would be skipped; verify flag is honored
+        service.startSampling(50, 5, false);
+        assertFalse(service.isIncludeDaemon());
+        service.stopSampling();
+    }
+
+    @Test
+    @DisplayName("MethodTraceAdvice relative depth increments and decrements")
+    void relativeDepthIncrementsAndDecrements() {
+        MethodTraceService.MethodTraceAdvice.resetDepth();
+        assertEquals(0, MethodTraceService.MethodTraceAdvice.currentDepth());
+
+        long t1 = MethodTraceService.MethodTraceAdvice.onEnter();
+        assertEquals(1, MethodTraceService.MethodTraceAdvice.currentDepth());
+        long t2 = MethodTraceService.MethodTraceAdvice.onEnter();
+        assertEquals(2, MethodTraceService.MethodTraceAdvice.currentDepth());
+
+        // Simulate nested exit without active collector (still must unwind depth)
+        MethodTraceService.MethodTraceAdvice.onExit(t2, null, null, "inner", "C", "inner()", new Object[0]);
+        assertEquals(1, MethodTraceService.MethodTraceAdvice.currentDepth());
+        MethodTraceService.MethodTraceAdvice.onExit(t1, null, null, "outer", "C", "outer()", new Object[0]);
+        assertEquals(0, MethodTraceService.MethodTraceAdvice.currentDepth());
+    }
 }

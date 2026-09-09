@@ -53,12 +53,15 @@ public final class TunnelServerMain {
         String tlsCert = null;
         String tlsKey = null;
         java.util.List<String> tokens = new java.util.ArrayList<>();
+        java.util.List<String> accessTokens = new java.util.ArrayList<>();
 
         for (String arg : args) {
             if (arg.startsWith("--port=")) {
                 port = Integer.parseInt(arg.substring("--port=".length()));
             } else if (arg.startsWith("--token=")) {
                 tokens.add(arg.substring("--token=".length()));
+            } else if (arg.startsWith("--access-token=")) {
+                accessTokens.add(arg.substring("--access-token=".length()));
             } else if (arg.startsWith("--tls-cert=")) {
                 tlsCert = arg.substring("--tls-cert=".length());
             } else if (arg.startsWith("--tls-key=")) {
@@ -77,6 +80,9 @@ public final class TunnelServerMain {
         for (String token : tokens) {
             server.addRegistrationToken(token);
         }
+        for (String token : accessTokens) {
+            server.addAccessToken(token);
+        }
 
         // Shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(server::stop, "tunnel-shutdown"));
@@ -88,6 +94,12 @@ public final class TunnelServerMain {
             LOG.warning("No registration tokens configured — any agent can connect (dev mode).");
         } else {
             LOG.info(tokens.size() + " registration token(s) configured.");
+        }
+        if (accessTokens.isEmpty()) {
+            LOG.warning("No --access-token configured — HTTP dashboard/proxy APIs are open (dev mode). "
+                    + "Configure --access-token for production.");
+        } else {
+            LOG.info(accessTokens.size() + " HTTP access token(s) configured.");
         }
 
         // Block main thread
@@ -101,11 +113,12 @@ public final class TunnelServerMain {
                 Usage: java -jar joltvm-tunnel-*-all.jar [options]
 
                 Options:
-                  --port=PORT         Server port (default: 8800)
-                  --token=SECRET      Registration token (repeatable)
-                  --tls-cert=PATH     TLS certificate (PEM)
-                  --tls-key=PATH      TLS private key (PEM)
-                  --help, -h          Show this help
+                  --port=PORT              Server port (default: 8800)
+                  --token=SECRET           Agent registration token (repeatable)
+                  --access-token=SECRET    HTTP dashboard/proxy access token (repeatable)
+                  --tls-cert=PATH          TLS certificate (PEM)
+                  --tls-key=PATH           TLS private key (PEM)
+                  --help, -h               Show this help
                 """);
     }
 }

@@ -44,7 +44,8 @@ import java.util.logging.Logger;
  *   "className": "com.example.MyService",  // required for "trace"
  *   "methodName": "handleRequest",         // optional, "*" for all methods
  *   "duration": 30,                        // seconds (default: 30, max: 300)
- *   "interval": 10                         // sampling interval in ms (for "sample" type)
+ *   "interval": 10,                        // sampling interval in ms (for "sample" type)
+ *   "includeDaemon": true                  // optional, sample daemon threads (default true)
  * }
  * </pre>
  *
@@ -140,14 +141,16 @@ public class TraceHandler implements RouteHandler {
     private FullHttpResponse startSampling(Map<?, ?> bodyMap) {
         int interval = getIntField(bodyMap, "interval", 10);
         int duration = getIntField(bodyMap, "duration", 30);
+        boolean includeDaemon = getBooleanField(bodyMap, "includeDaemon", true);
 
-        traceService.startSampling(interval, duration);
+        traceService.startSampling(interval, duration, includeDaemon);
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("success", true);
         response.put("type", "sample");
         response.put("interval", interval);
         response.put("duration", duration);
+        response.put("includeDaemon", includeDaemon);
         response.put("message", "Stack sampling started");
 
         return HttpResponseHelper.json(response);
@@ -209,6 +212,22 @@ public class TraceHandler implements RouteHandler {
         Object value = map.get(key);
         if (value instanceof Number) {
             return ((Number) value).intValue();
+        }
+        return defaultValue;
+    }
+
+    private static boolean getBooleanField(Map<?, ?> map, String key, boolean defaultValue) {
+        Object value = map.get(key);
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        if (value instanceof String s) {
+            if ("true".equalsIgnoreCase(s)) {
+                return true;
+            }
+            if ("false".equalsIgnoreCase(s)) {
+                return false;
+            }
         }
         return defaultValue;
     }

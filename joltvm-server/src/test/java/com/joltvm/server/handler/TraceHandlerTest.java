@@ -158,6 +158,24 @@ class TraceHandlerTest {
         assertTrue(body.contains("\"success\":true"));
         assertTrue(body.contains("\"type\":\"sample\""));
         assertTrue(body.contains("Stack sampling started"));
+        assertTrue(body.contains("\"includeDaemon\":true"));
+
+        response.release();
+        request.release();
+    }
+
+    @Test
+    @DisplayName("start sampling accepts includeDaemon=false")
+    void startSamplingAcceptsIncludeDaemonFalse() {
+        String json = HttpResponseHelper.gson().toJson(
+                Map.of("type", "sample", "interval", 50, "duration", 5, "includeDaemon", false));
+        FullHttpRequest request = createPostRequest("/api/trace/start", json);
+        FullHttpResponse response = handler.handle(request, Map.of());
+
+        assertEquals(HttpResponseStatus.OK, response.status());
+        String body = response.content().toString(StandardCharsets.UTF_8);
+        assertTrue(body.contains("\"includeDaemon\":false"));
+        assertFalse(traceService.isIncludeDaemon());
 
         response.release();
         request.release();

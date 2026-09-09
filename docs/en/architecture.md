@@ -529,6 +529,8 @@ JoltVM validates changes before applying and provides clear error messages when 
 
 JoltVM provides two complementary profiling mechanisms: **method tracing** (Byte Buddy Advice injection) and **stack sampling** (periodic `Thread.getAllStackTraces()`).
 
+JDK `Thread.getAllStackTraces()` sampling has **safepoint bias**; for production-accurate CPU/allocation profiles, prefer the async-profiler integration. Sampling includes daemon threads by default (`includeDaemon`).
+
 #### Method Tracing (Byte Buddy Advice)
 
 ```
@@ -590,7 +592,7 @@ POST /api/trace/start  { "type": "sample", "interval": 10 }
 └─────────────────────────┘  Compatible with d3-flame-graph
 ```
 
-**Sampling filter**: Daemon threads and threads whose name starts with `joltvm-` are excluded from sampling to avoid polluting the flame graph with JoltVM's own overhead.
+**Sampling filter**: Daemon threads are included by default (`includeDaemon=true`); threads whose name starts with `joltvm-` remain excluded to avoid polluting the flame graph with JoltVM's own overhead.
 
 #### Flame Graph Data Model
 
@@ -713,13 +715,13 @@ JoltVM provides a secure OGNL expression evaluation engine for inspecting runtim
 
 *(Phase 14 — Implemented)*
 
-Multiple concurrent method observation sessions (max 10). Each `WatchSession` owns its own Byte Buddy `ResettableClassFileTransformer`. OGNL context variables: `#args`, `#returnObj`, `#throwExp`, `#cost`, `#target`, `#clazz`. Sessions auto-expire after configurable duration (default 60s, max 5min).
+Multiple concurrent method observation sessions (max 10). Each `WatchSession` owns its own Byte Buddy `ResettableClassFileTransformer`. Optional `conditionExpr` is compiled and evaluated server-side through the same OGNL sandbox (`OgnlService.evaluateCondition`). Context variables: `#args`, `#returnObj`, `#throwExp`, `#cost`, `#target`, `#clazz`. Sessions auto-expire after configurable duration (default 60s, max 5min).
 
 ### WebSocket Real-time Push
 
 *(Phase 16 — Implemented)*
 
-Netty pipeline includes `WebSocketServerProtocolHandler` at `/ws`. JSON-based pub/sub protocol with channels: `threads.top` (5s), `gc.stats` (10s), `jvm.memory` (5s). `SubscriptionManager` manages per-channel subscriptions with periodic data push. Client-side `websocket.js` provides auto-reconnect with exponential backoff and REST fallback.
+Netty pipeline includes `WebSocketAuthHandler` (validates `?token=` when security is enabled) then `WebSocketServerProtocolHandler` at `/ws`. JSON-based pub/sub protocol with channels: `threads.top` (5s), `gc.stats` (10s), `jvm.memory` (5s). `SubscriptionManager` manages per-channel subscriptions with periodic data push. Client-side `websocket.js` provides auto-reconnect with exponential backoff and REST fallback.
 
 ### Plugin/SPI Extension
 
@@ -733,6 +735,8 @@ Netty pipeline includes `WebSocketServerProtocolHandler` at `/ws`. JSON-based pu
 
 See [joltvm-tunnel](#joltvm-tunnel) module above. The tunnel enables diagnosing JVMs behind firewalls or in Kubernetes pods without opening inbound ports.
 
+**Auth layers:** `--token` for agent registration; `--access-token` for HTTP dashboard/proxy (Bearer or query). Agent TLS uses the JVM trust store by default; set `tunnelTrustCert` for private CAs, or `tunnelInsecureSkipVerify=true` only for local development.
+
 ```
 Agent → TunnelClient → outbound WS → TunnelServer → AgentRegistry
                                               ↕
@@ -740,6 +744,10 @@ User → HTTP request → TunnelHttpHandler → RequestCorrelator → WS frame �
                                               ↕
 Agent → WS response → RequestCorrelator.complete() → HTTP response → User
 ```
+
+### Distribution packaging
+
+The release agent JAR is built by `joltvm-distribution` (`./gradlew :joltvm-distribution:shadowJar` → `joltvm-agent-*-all.jar`). It merges agent + server with relocated dependencies. CLI embeds that JAR for `attach`. CI runs `:joltvm-distribution:verifyShadowJar`.
 
 ---
 

@@ -102,6 +102,9 @@ public class AgentRegistry {
     /**
      * Registers an agent connection.
      *
+     * <p>If the same {@code agentId} is already registered, the previous channel is
+     * closed and removed from the reverse index before the new registration is stored.
+     *
      * @param agentId  the agent ID
      * @param channel  the WebSocket channel
      * @param metadata agent metadata
@@ -110,7 +113,17 @@ public class AgentRegistry {
     public AgentInfo register(String agentId, Channel channel, Map<String, String> metadata) {
         long now = System.currentTimeMillis();
         AgentInfo info = new AgentInfo(agentId, channel, metadata, now, now);
-        agents.put(agentId, info);
+
+        AgentInfo previous = agents.put(agentId, info);
+        if (previous != null && previous.channel() != null && previous.channel() != channel) {
+            // Drop reverse index for the old channel first so its channelInactive
+            // does not unregister the newly registered agent.
+            channelToAgent.remove(previous.channel());
+            if (previous.channel().isActive()) {
+                previous.channel().close();
+            }
+        }
+
         channelToAgent.put(channel, agentId);
         return info;
     }

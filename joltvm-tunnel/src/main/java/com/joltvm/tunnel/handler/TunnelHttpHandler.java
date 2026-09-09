@@ -17,6 +17,7 @@
 package com.joltvm.tunnel.handler;
 
 import com.google.gson.Gson;
+import com.joltvm.tunnel.AccessTokenStore;
 import com.joltvm.tunnel.AgentRegistry;
 import com.joltvm.tunnel.RequestCorrelator;
 import com.joltvm.tunnel.TunnelProtocol;
@@ -59,11 +60,18 @@ public class TunnelHttpHandler extends SimpleChannelInboundHandler<FullHttpReque
     private final AgentRegistry registry;
     private final RequestCorrelator correlator;
     private final String serverVersion;
+    private final AccessTokenStore accessTokens;
 
     public TunnelHttpHandler(AgentRegistry registry, RequestCorrelator correlator, String serverVersion) {
+        this(registry, correlator, serverVersion, new AccessTokenStore());
+    }
+
+    public TunnelHttpHandler(AgentRegistry registry, RequestCorrelator correlator,
+                             String serverVersion, AccessTokenStore accessTokens) {
         this.registry = registry;
         this.correlator = correlator;
         this.serverVersion = serverVersion;
+        this.accessTokens = accessTokens != null ? accessTokens : new AccessTokenStore();
     }
 
     @Override
@@ -78,8 +86,17 @@ public class TunnelHttpHandler extends SimpleChannelInboundHandler<FullHttpReque
             return;
         }
 
+        // Health remains anonymous for load-balancer probes
+        boolean isHealth = HEALTH_PATH.equals(path) && method == HttpMethod.GET;
+        if (!isHealth && !authorize(request)) {
+            sendJson(ctx, request, HttpResponseStatus.UNAUTHORIZED,
+                    Map.of("error", "Authentication required. Provide Authorization: Bearer <access-token> "
+                            + "or X-Tunnel-Access-Token header."));
+            return;
+        }
+
         try {
-            if (HEALTH_PATH.equals(path) && method == HttpMethod.GET) {
+            if (isHealth) {
                 handleHealth(ctx, request);
             } else if (path.equals(AGENTS_PREFIX) && method == HttpMethod.GET) {
                 handleAgentList(ctx, request);
@@ -90,6 +107,10 @@ public class TunnelHttpHandler extends SimpleChannelInboundHandler<FullHttpReque
                     // Proxy request: /api/tunnel/agents/{id}/proxy/{path}
                     String agentId = remainder.substring(0, proxyIdx - 1); // before /proxy
                     String proxyPath = "/" + remainder.substring(proxyIdx + "proxy/".length());
+                    // Preserve query string for proxied path
+                    if (uri.contains("?")) {
+                        proxyPath = proxyPath + uri.substring(uri.indexOf('?'));
+                    }
                     handleProxy(ctx, request, agentId, proxyPath);
                 } else if (!remainder.contains("/")) {
                     // Agent detail: /api/tunnel/agents/{id}
@@ -106,6 +127,27 @@ public class TunnelHttpHandler extends SimpleChannelInboundHandler<FullHttpReque
             sendJson(ctx, request, HttpResponseStatus.INTERNAL_SERVER_ERROR,
                     Map.of("error", "Internal server error"));
         }
+    }
+
+    private boolean authorize(FullHttpRequest request) {
+        if (!accessTokens.isConfigured()) {
+            return true;
+        }
+        String auth = request.headers().get(HttpHeaderNames.AUTHORIZATION);
+        if (auth != null && auth.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            return accessTokens.isValid(auth.substring(7).trim());
+        }
+        String headerToken = request.headers().get("X-Tunnel-Access-Token");
+        if (headerToken != null) {
+            return accessTokens.isValid(headerToken.trim());
+        }
+        // Allow query param for dashboard convenience: ?accessToken=
+        QueryStringDecoder decoder = new QueryStringDecoder(request.uri());
+        List<String> queryTokens = decoder.parameters().get("accessToken");
+        if (queryTokens != null && !queryTokens.isEmpty()) {
+            return accessTokens.isValid(queryTokens.get(0));
+        }
+        return false;
     }
 
     private void handleHealth(ChannelHandlerContext ctx, FullHttpRequest request) {
@@ -166,8 +208,9 @@ public class TunnelHttpHandler extends SimpleChannelInboundHandler<FullHttpReque
         String tunnelRequest = TunnelProtocol.createRequest(requestId, method, proxyPath, headers, body);
         agent.channel().writeAndFlush(new TextWebSocketFrame(tunnelRequest));
 
-        // Wait for response
-        CompletableFuture<RequestCorrelator.ProxiedResponse> future = correlator.registerRequest(requestId);
+        // Wait for response (tied to agent for disconnect cancellation)
+        CompletableFuture<RequestCorrelator.ProxiedResponse> future =
+                correlator.registerRequest(requestId, agentId);
         future.whenComplete((response, ex) -> {
             if (ex != null) {
                 sendJson(ctx, request, HttpResponseStatus.GATEWAY_TIMEOUT,

@@ -17,6 +17,7 @@
 package com.joltvm.server.watch;
 
 import com.joltvm.agent.InstrumentationHolder;
+import com.joltvm.server.ognl.OgnlService;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
 import net.bytebuddy.asm.Advice;
@@ -28,9 +29,11 @@ import net.bytebuddy.matcher.ElementMatchers;
 import java.lang.instrument.Instrumentation;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -44,6 +47,11 @@ import java.util.logging.Logger;
  * <p>Each watch session installs its own Byte Buddy Advice transformer,
  * captures invocations matching the class/method pattern, and stores
  * records in a bounded per-session buffer.
+ *
+ * <p>Optional OGNL {@code conditionExpr} is validated and precompiled at
+ * {@link #startWatch}; evaluation runs here (not in {@link WatchAdvice})
+ * with context variables {@code #args}, {@code #returnObj}, {@code #throwExp},
+ * {@code #cost}, {@code #target}, {@code #clazz}.
  *
  * <p>Hard limit: {@value MAX_CONCURRENT_WATCHES} concurrent watches.
  * Sessions auto-expire after their configured duration.
@@ -61,19 +69,32 @@ public class WatchService {
     /** Maximum watch duration in milliseconds (5 minutes). */
     static final long MAX_DURATION_MS = 300_000;
 
+    /** Max length for stringified args / return / exception message in records. */
+    private static final int TRUNCATE_LEN = 200;
+
+    /** Static bridge for Advice callbacks (Advice must not touch OGNL). */
+    private static volatile WatchService bridge;
+
     /** Active watch sessions (id -> session). */
     private final ConcurrentHashMap<String, WatchSession> sessions = new ConcurrentHashMap<>();
 
     /** Byte Buddy transformers per session (id -> transformer). */
     private final ConcurrentHashMap<String, ResettableClassFileTransformer> transformers = new ConcurrentHashMap<>();
 
-    /** Shared map for Advice callback to find session by class+method. */
+    /** Shared map for Advice callback to find session by id. */
     private static final ConcurrentHashMap<String, WatchSession> ACTIVE_SESSIONS = new ConcurrentHashMap<>();
 
     /** Scheduler for session expiration cleanup. */
     private final ScheduledExecutorService scheduler;
 
+    private final OgnlService ognlService;
+
     public WatchService() {
+        this(new OgnlService());
+    }
+
+    public WatchService(OgnlService ognlService) {
+        this.ognlService = Objects.requireNonNull(ognlService, "ognlService");
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "joltvm-watch-cleaner");
             t.setDaemon(true);
@@ -81,6 +102,7 @@ public class WatchService {
         });
         // Periodically clean expired sessions
         scheduler.scheduleAtFixedRate(this::cleanExpiredSessions, 10, 10, TimeUnit.SECONDS);
+        bridge = this;
     }
 
     /**
@@ -93,6 +115,7 @@ public class WatchService {
      * @param durationMs    session duration in ms (default 60s, max 5min)
      * @return the created session's summary map
      * @throws IllegalStateException if max concurrent watches reached or instrumentation unavailable
+     * @throws IllegalArgumentException if classPattern blank or conditionExpr invalid
      */
     public Map<String, Object> startWatch(String classPattern, String methodPattern,
                                            String conditionExpr, int maxRecords, long durationMs) {
@@ -103,18 +126,37 @@ public class WatchService {
             throw new IllegalStateException("Maximum concurrent watches reached (" + MAX_CONCURRENT_WATCHES
                     + "). Stop an existing watch first.");
         }
+
+        long effectiveDuration = durationMs > 0 ? Math.min(durationMs, MAX_DURATION_MS) : DEFAULT_DURATION_MS;
+        String effectiveMethod = (methodPattern == null || methodPattern.isBlank()) ? "*" : methodPattern;
+        String effectiveCondition = (conditionExpr == null || conditionExpr.isBlank())
+                ? null : conditionExpr.trim();
+
+        // Validate + precompile before touching instrumentation
+        Object compiledCondition = null;
+        if (effectiveCondition != null) {
+            try {
+                compiledCondition = ognlService.compileCondition(effectiveCondition);
+            } catch (SecurityException e) {
+                throw new IllegalArgumentException("Invalid conditionExpr: " + e.getMessage(), e);
+            } catch (IllegalArgumentException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Invalid conditionExpr: " + e.getMessage(), e);
+            }
+        }
+
         if (!InstrumentationHolder.isAvailable()) {
             throw new IllegalStateException("Instrumentation not available. Agent may not be loaded.");
         }
 
-        long effectiveDuration = durationMs > 0 ? Math.min(durationMs, MAX_DURATION_MS) : DEFAULT_DURATION_MS;
-        String effectiveMethod = (methodPattern == null || methodPattern.isBlank()) ? "*" : methodPattern;
-
         WatchSession session = new WatchSession(classPattern, effectiveMethod,
-                conditionExpr, maxRecords, effectiveDuration);
+                effectiveCondition, maxRecords, effectiveDuration);
+        if (compiledCondition != null) {
+            session.setCompiledCondition(compiledCondition);
+        }
 
         // Register for Advice callback
-        String watchKey = buildWatchKey(classPattern, effectiveMethod);
         ACTIVE_SESSIONS.put(session.getId(), session);
         sessions.put(session.getId(), session);
 
@@ -230,26 +272,93 @@ public class WatchService {
         return result;
     }
 
-    /** Used by WatchAdvice to record an invocation. */
+    /**
+     * Used by {@link WatchAdvice} to record an invocation.
+     * Condition evaluation and stringification happen here on the agent side.
+     */
     static void recordInvocation(String className, String methodName,
-                                  String[] args, String returnValue,
-                                  String exceptionType, String exceptionMessage,
-                                  long durationNanos) {
+                                  Object[] args, Object returnValue, Throwable thrown,
+                                  Object target, Class<?> clazz, long durationNanos) {
+        WatchService svc = bridge;
+        if (svc == null) {
+            return;
+        }
+        svc.doRecordInvocation(className, methodName, args, returnValue, thrown,
+                target, clazz, durationNanos);
+    }
+
+    private void doRecordInvocation(String className, String methodName,
+                                     Object[] args, Object returnValue, Throwable thrown,
+                                     Object target, Class<?> clazz, long durationNanos) {
         for (WatchSession session : ACTIVE_SESSIONS.values()) {
             if (!session.isActive()) continue;
-            if (matchesSession(session, className, methodName)) {
-                WatchRecord record = new WatchRecord(
-                        Instant.now(), className, methodName,
-                        Thread.currentThread().getName(), Thread.currentThread().getId(),
-                        args, returnValue, exceptionType, exceptionMessage,
-                        durationNanos, exceptionType != null ? "EXCEPTION" : "AFTER");
-                session.addRecord(record);
+            if (!matchesSession(session, className, methodName)) continue;
+
+            session.incrementTotalSeen();
+
+            if (session.getCompiledCondition() != null) {
+                Map<String, Object> ctx = buildConditionContext(
+                        args, returnValue, thrown, target, clazz, durationNanos);
+                if (!ognlService.evaluateCondition(session.getCompiledCondition(), ctx)) {
+                    continue;
+                }
             }
+
+            String[] argStrings = stringifyArgs(args);
+            String returnStr = (thrown == null && returnValue != null)
+                    ? truncate(safeToString(returnValue), TRUNCATE_LEN) : null;
+            String exType = thrown != null ? thrown.getClass().getName() : null;
+            String exMsg = thrown != null ? truncate(safeToString(thrown.getMessage()), TRUNCATE_LEN) : null;
+
+            WatchRecord record = new WatchRecord(
+                    Instant.now(), className, methodName,
+                    Thread.currentThread().getName(), Thread.currentThread().getId(),
+                    argStrings, returnStr, exType, exMsg,
+                    durationNanos, thrown != null ? "EXCEPTION" : "AFTER");
+            session.addRecord(record);
         }
     }
 
+    private static Map<String, Object> buildConditionContext(
+            Object[] args, Object returnValue, Throwable thrown,
+            Object target, Class<?> clazz, long durationNanos) {
+        Map<String, Object> ctx = new HashMap<>(8);
+        ctx.put("args", args != null ? args : new Object[0]);
+        ctx.put("returnObj", returnValue);
+        ctx.put("throwExp", thrown);
+        ctx.put("cost", durationNanos);
+        ctx.put("target", target);
+        ctx.put("clazz", clazz);
+        return ctx;
+    }
+
+    private static String[] stringifyArgs(Object[] arguments) {
+        if (arguments == null) {
+            return null;
+        }
+        String[] argStrings = new String[arguments.length];
+        for (int i = 0; i < arguments.length; i++) {
+            argStrings[i] = truncate(safeToString(arguments[i]), TRUNCATE_LEN);
+        }
+        return argStrings;
+    }
+
+    private static String safeToString(Object obj) {
+        if (obj == null) return "null";
+        try {
+            return obj.toString();
+        } catch (Exception e) {
+            return obj.getClass().getName() + "@" + Integer.toHexString(System.identityHashCode(obj));
+        }
+    }
+
+    private static String truncate(String str, int maxLen) {
+        if (str == null) return null;
+        return str.length() > maxLen ? str.substring(0, maxLen) + "..." : str;
+    }
+
     private static boolean matchesSession(WatchSession session, String className, String methodName) {
-        if (!session.getClassPattern().equals(className)) return false;
+        if (className == null || !session.getClassPattern().equals(className)) return false;
         String pattern = session.getMethodPattern();
         return "*".equals(pattern) || pattern.equals(methodName);
     }
@@ -274,8 +383,10 @@ public class WatchService {
         }
     }
 
-    private String buildWatchKey(String classPattern, String methodPattern) {
-        return classPattern + "#" + methodPattern;
+    /** Visible for testing — registers a session without installing Advice. */
+    void registerSessionForTest(WatchSession session) {
+        ACTIVE_SESSIONS.put(session.getId(), session);
+        sessions.put(session.getId(), session);
     }
 
     /** Shuts down the service. */
@@ -283,6 +394,9 @@ public class WatchService {
         scheduler.shutdownNow();
         for (String id : new ArrayList<>(sessions.keySet())) {
             deleteWatch(id);
+        }
+        if (bridge == this) {
+            bridge = null;
         }
     }
 

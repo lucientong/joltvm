@@ -106,7 +106,43 @@ public final class APIRoutes {
      * Immutable holder for shared service instances, ensuring atomic publication
      * of all service references via a single volatile write.
      */
-    private record ServiceHolder(MethodTraceService traceService, AuditLogService auditLogService) {
+    private record ServiceHolder(
+            MethodTraceService traceService,
+            AuditLogService auditLogService,
+            WatchService watchService,
+            OgnlService ognlService,
+            PluginLifecycleManager pluginManager
+    ) {
+        void shutdown() {
+            if (traceService != null) {
+                try {
+                    traceService.stopAll();
+                } catch (Exception ignored) {
+                    // best-effort
+                }
+            }
+            if (watchService != null) {
+                try {
+                    watchService.shutdown();
+                } catch (Exception ignored) {
+                    // best-effort
+                }
+            }
+            if (ognlService != null) {
+                try {
+                    ognlService.shutdown();
+                } catch (Exception ignored) {
+                    // best-effort
+                }
+            }
+            if (pluginManager != null) {
+                try {
+                    pluginManager.shutdown();
+                } catch (Exception ignored) {
+                    // best-effort
+                }
+            }
+        }
     }
 
     private static volatile ServiceHolder services;
@@ -139,6 +175,17 @@ public final class APIRoutes {
     public static AuditLogService getAuditLogService() {
         ServiceHolder holder = services;
         return holder != null ? holder.auditLogService() : null;
+    }
+
+    /**
+     * Shuts down all shared services registered by {@link #registerAll}.
+     * Idempotent and safe to call when routes were never registered.
+     */
+    public static void shutdownServices() {
+        ServiceHolder holder = services;
+        if (holder != null) {
+            holder.shutdown();
+        }
     }
 
     /**
@@ -201,7 +248,7 @@ public final class APIRoutes {
         ClassLoaderService classLoaderService = new ClassLoaderService();
         LoggerService loggerService = new LoggerService();
         OgnlService ognlService = new OgnlService();
-        WatchService watchService = new WatchService();
+        WatchService watchService = new WatchService(ognlService);
         AsyncProfilerService asyncProfilerService = new AsyncProfilerService();
         PluginLifecycleManager pluginManager = new PluginLifecycleManager(router);
 
@@ -211,7 +258,8 @@ public final class APIRoutes {
                 : AuditLogService.createWithDefaultPath();
 
         // Atomic publication of all service references via immutable holder
-        services = new ServiceHolder(traceService, auditLogService);
+        services = new ServiceHolder(
+                traceService, auditLogService, watchService, ognlService, pluginManager);
 
         router.addRoute(HttpMethod.GET, "/api/health", new HealthHandler());
 

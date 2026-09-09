@@ -45,8 +45,12 @@ public class WatchSession {
     private final Instant createdAt;
 
     private final CopyOnWriteArrayList<WatchRecord> records = new CopyOnWriteArrayList<>();
+    private final AtomicInteger totalSeen = new AtomicInteger(0);
     private final AtomicInteger totalMatched = new AtomicInteger(0);
     private volatile boolean active = true;
+
+    /** Precompiled OGNL AST for {@link #conditionExpr}; null if no condition. */
+    private volatile Object compiledCondition;
 
     public WatchSession(String classPattern, String methodPattern,
                         String conditionExpr, int maxRecords, long durationMs) {
@@ -69,6 +73,19 @@ public class WatchSession {
         this.maxRecords = Math.min(maxRecords > 0 ? maxRecords : MAX_RECORDS, MAX_RECORDS);
         this.expireAtMs = System.currentTimeMillis() + durationMs;
         this.createdAt = Instant.now();
+    }
+
+    /** Increments the count of class/method-matched invocations (before condition filter). */
+    public void incrementTotalSeen() {
+        totalSeen.incrementAndGet();
+    }
+
+    void setCompiledCondition(Object compiledCondition) {
+        this.compiledCondition = compiledCondition;
+    }
+
+    Object getCompiledCondition() {
+        return compiledCondition;
     }
 
     /**
@@ -116,6 +133,7 @@ public class WatchSession {
         map.put("methodPattern", methodPattern);
         if (conditionExpr != null) map.put("conditionExpr", conditionExpr);
         map.put("recordCount", records.size());
+        map.put("totalSeen", totalSeen.get());
         map.put("totalMatched", totalMatched.get());
         map.put("maxRecords", maxRecords);
         map.put("active", active);
@@ -128,6 +146,8 @@ public class WatchSession {
     public String getClassPattern() { return classPattern; }
     public String getMethodPattern() { return methodPattern; }
     public String getConditionExpr() { return conditionExpr; }
+    public int getTotalSeen() { return totalSeen.get(); }
+    public int getTotalMatched() { return totalMatched.get(); }
     public boolean isActive() { return active && !isExpired(); }
     public Instant getCreatedAt() { return createdAt; }
 }

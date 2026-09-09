@@ -98,6 +98,9 @@ public class MethodTraceService {
     private volatile ScheduledFuture<?> samplingStopFuture;
     private volatile String currentTraceTarget;
 
+    /** Whether stack sampling includes daemon threads (default true). */
+    private volatile boolean includeDaemon = true;
+
     /**
      * Holds the {@link ResettableClassFileTransformer} returned by the last
      * {@code AgentBuilder.installOn()} call. Used in {@link #stopTrace()} to properly
@@ -317,14 +320,27 @@ public class MethodTraceService {
     /**
      * Starts periodic stack sampling for flame graph data collection.
      *
-     * <p>Samples all non-daemon threads at the specified interval. Each sample
-     * captures the stack trace and feeds it to the flame graph collector.
+     * <p>Samples threads at the specified interval (daemon threads included by default).
+     * Each sample captures the stack trace and feeds it to the flame graph collector.
+     * Threads named with the {@code joltvm-} prefix and empty stacks are always skipped.
      *
      * @param intervalMs      sampling interval in milliseconds
      * @param durationSeconds how long to sample (auto-stops after this duration)
      * @throws TracingException if sampling cannot be started
      */
     public void startSampling(int intervalMs, int durationSeconds) {
+        startSampling(intervalMs, durationSeconds, true);
+    }
+
+    /**
+     * Starts periodic stack sampling for flame graph data collection.
+     *
+     * @param intervalMs      sampling interval in milliseconds
+     * @param durationSeconds how long to sample (auto-stops after this duration)
+     * @param includeDaemon   whether to include daemon threads (default {@code true})
+     * @throws TracingException if sampling cannot be started
+     */
+    public void startSampling(int intervalMs, int durationSeconds, boolean includeDaemon) {
         if (sampling.get()) {
             throw new TracingException("Stack sampling is already active. Stop it first.");
         }
@@ -333,7 +349,9 @@ public class MethodTraceService {
                 Math.min(MAX_SAMPLING_INTERVAL_MS, intervalMs));
         int duration = normalizeDuration(durationSeconds);
 
-        LOG.info("Starting stack sampling (interval=" + interval + "ms, duration=" + duration + "s)");
+        this.includeDaemon = includeDaemon;
+        LOG.info("Starting stack sampling (interval=" + interval + "ms, duration=" + duration
+                + "s, includeDaemon=" + includeDaemon + ")");
         sampling.set(true);
 
         ensureScheduler();
@@ -405,6 +423,7 @@ public class MethodTraceService {
         Map<String, Object> status = new java.util.LinkedHashMap<>();
         status.put("tracing", tracing.get());
         status.put("sampling", sampling.get());
+        status.put("includeDaemon", includeDaemon);
         status.put("traceTarget", currentTraceTarget);
         status.put("tracedClasses", new ArrayList<>(tracedClasses));
         status.put("recordCount", collector.getRecordCount());
@@ -416,14 +435,21 @@ public class MethodTraceService {
     // Internal helpers
     // ========================================================================
 
-    private void sampleAllThreads() {
+    /**
+     * Samples all threads. Daemon threads are included when {@link #includeDaemon} is true.
+     * Always skips empty stacks and threads whose names start with {@code joltvm-}.
+     */
+    void sampleAllThreads() {
+        boolean includeDaemons = this.includeDaemon;
         Map<Thread, StackTraceElement[]> stacks = Thread.getAllStackTraces();
         for (Map.Entry<Thread, StackTraceElement[]> entry : stacks.entrySet()) {
             Thread thread = entry.getKey();
             StackTraceElement[] stack = entry.getValue();
 
-            // Skip daemon threads, JoltVM threads, and empty stacks
-            if (thread.isDaemon() || stack.length == 0) {
+            if (stack.length == 0) {
+                continue;
+            }
+            if (!includeDaemons && thread.isDaemon()) {
                 continue;
             }
             if (thread.getName().startsWith("joltvm-")) {
@@ -432,6 +458,16 @@ public class MethodTraceService {
 
             collector.addStackSample(stack);
         }
+    }
+
+    // Visible for testing
+    public void setIncludeDaemon(boolean includeDaemon) {
+        this.includeDaemon = includeDaemon;
+    }
+
+    // Visible for testing
+    public boolean isIncludeDaemon() {
+        return includeDaemon;
     }
 
     private int normalizeDuration(int durationSeconds) {
@@ -465,12 +501,20 @@ public class MethodTraceService {
     public static class MethodTraceAdvice {
 
         /**
+         * Relative nesting depth among instrumented methods on the current thread.
+         * This is <em>not</em> a full JVM call tree (unlike Arthas {@code trace});
+         * it only tracks enter/exit of methods that carry this Advice.
+         */
+        private static final ThreadLocal<Integer> RELATIVE_DEPTH = ThreadLocal.withInitial(() -> 0);
+
+        /**
          * Called before the traced method body executes.
          *
          * @return the start time in nanoseconds
          */
         @Advice.OnMethodEnter
         public static long onEnter() {
+            RELATIVE_DEPTH.set(RELATIVE_DEPTH.get() + 1);
             return System.nanoTime();
         }
 
@@ -495,47 +539,74 @@ public class MethodTraceService {
                 @Advice.Origin("#s") String signature,
                 @Advice.AllArguments Object[] arguments) {
 
-            FlameGraphCollector collector = MethodTraceService.getActiveCollector();
-            if (collector == null) {
-                return; // Tracing stopped
-            }
+            int depth = 0;
+            try {
+                // After onEnter, DEPTH is the 1-based nesting level; store 0-based depth.
+                depth = Math.max(0, RELATIVE_DEPTH.get() - 1);
 
-            long durationNanos = System.nanoTime() - startTime;
-            Thread currentThread = Thread.currentThread();
+                FlameGraphCollector collector = MethodTraceService.getActiveCollector();
+                if (collector == null) {
+                    return; // Tracing stopped
+                }
 
-            // Extract parameter types from signature
-            List<String> paramTypes = extractParamTypes(signature);
+                long durationNanos = System.nanoTime() - startTime;
+                Thread currentThread = Thread.currentThread();
 
-            // Convert arguments to strings (truncated)
-            List<String> argStrings = new ArrayList<>();
-            if (arguments != null) {
-                for (Object arg : arguments) {
-                    argStrings.add(truncate(safeToString(arg), 200));
+                // Extract parameter types from signature
+                List<String> paramTypes = extractParamTypes(signature);
+
+                // Convert arguments to strings (truncated)
+                List<String> argStrings = new ArrayList<>();
+                if (arguments != null) {
+                    for (Object arg : arguments) {
+                        argStrings.add(truncate(safeToString(arg), 200));
+                    }
+                }
+
+                String returnStr = (thrown == null && returnValue != null)
+                        ? truncate(safeToString(returnValue), 200) : null;
+                String exType = thrown != null ? thrown.getClass().getName() : null;
+                String exMsg = thrown != null ? truncate(safeToString(thrown.getMessage()), 200) : null;
+
+                TraceRecord record = new TraceRecord(
+                        UUID.randomUUID().toString().substring(0, 8),
+                        declaringType,
+                        methodName,
+                        paramTypes,
+                        argStrings,
+                        returnStr,
+                        exType,
+                        exMsg,
+                        durationNanos,
+                        currentThread.getName(),
+                        currentThread.getId(),
+                        Instant.now(),
+                        depth
+                );
+
+                collector.addRecord(record);
+            } finally {
+                int current = RELATIVE_DEPTH.get();
+                if (current <= 1) {
+                    RELATIVE_DEPTH.remove();
+                } else {
+                    RELATIVE_DEPTH.set(current - 1);
                 }
             }
+        }
 
-            String returnStr = (thrown == null && returnValue != null)
-                    ? truncate(safeToString(returnValue), 200) : null;
-            String exType = thrown != null ? thrown.getClass().getName() : null;
-            String exMsg = thrown != null ? truncate(safeToString(thrown.getMessage()), 200) : null;
+        /**
+         * Resets relative depth for the current thread. Visible for unit tests.
+         */
+        static void resetDepth() {
+            RELATIVE_DEPTH.remove();
+        }
 
-            TraceRecord record = new TraceRecord(
-                    UUID.randomUUID().toString().substring(0, 8),
-                    declaringType,
-                    methodName,
-                    paramTypes,
-                    argStrings,
-                    returnStr,
-                    exType,
-                    exMsg,
-                    durationNanos,
-                    currentThread.getName(),
-                    currentThread.getId(),
-                    Instant.now(),
-                    0 // depth is 0 for direct tracing; call chain depth requires more complex tracking
-            );
-
-            collector.addRecord(record);
+        /**
+         * Returns the current relative depth counter (1-based nesting after enter). Visible for tests.
+         */
+        static int currentDepth() {
+            return RELATIVE_DEPTH.get();
         }
 
         private static String safeToString(Object obj) {

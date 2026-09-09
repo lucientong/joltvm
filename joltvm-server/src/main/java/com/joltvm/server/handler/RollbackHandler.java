@@ -88,10 +88,14 @@ public class RollbackHandler implements RouteHandler {
         }
 
         String reason = bodyMap.get("reason") instanceof String r ? r : null;
+        String classLoaderId = bodyMap.get("classLoaderId") instanceof String id ? id : null;
+        if (classLoaderId != null && classLoaderId.isBlank()) {
+            classLoaderId = null;
+        }
         String operator = extractOperator(request);
 
         try {
-            HotSwapRecord record = hotSwapService.rollback(className, operator, reason);
+            HotSwapRecord record = hotSwapService.rollback(className, operator, reason, classLoaderId);
 
             // Record to audit log if available
             AuditLogService auditLogService = com.joltvm.server.APIRoutes.getAuditLogService();
@@ -113,6 +117,13 @@ public class RollbackHandler implements RouteHandler {
                 return HttpResponseHelper.json(HttpResponseStatus.BAD_REQUEST, response);
             }
 
+        } catch (com.joltvm.server.classloader.AmbiguousClassException e) {
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("success", false);
+            response.put("error", e.getMessage());
+            response.put("className", e.getClassName());
+            response.put("candidates", e.getCandidates());
+            return HttpResponseHelper.json(HttpResponseStatus.CONFLICT, response);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Rollback error for " + className, e);
             return HttpResponseHelper.serverError("Rollback failed due to an internal error.");

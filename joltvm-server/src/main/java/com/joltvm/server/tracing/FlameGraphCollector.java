@@ -16,8 +16,11 @@
 
 package com.joltvm.server.tracing;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -133,22 +136,55 @@ public class FlameGraphCollector {
     /**
      * Builds a flame graph tree from the collected trace records.
      *
-     * <p>Uses the trace records to build a call tree where each node
-     * represents a method frame and the value is the total duration
-     * in microseconds.
+     * <p>Nests frames by {@link TraceRecord#depth()} within each thread, using
+     * chronological order. Depth is the <em>relative</em> nesting of instrumented
+     * methods only (not a full JVM call tree). Records with depth 0 hang under root;
+     * deeper frames nest under their same-thread ancestors.
+     *
+     * <p>Advice records on method exit (children before parents). For each thread we
+     * walk records from newest to oldest so parents are placed before children, then
+     * nest by depth. Sibling top-level calls are handled by popping the stack when
+     * depth returns to 0.
      *
      * @return the root node of the flame graph tree, serializable to d3-flame-graph JSON
      */
     public FlameGraphNode buildFlameGraphFromRecords() {
         FlameGraphNode root = new FlameGraphNode("root", 0);
 
+        // Group by thread while preserving chronological (insertion = exit) order
+        Map<Long, List<TraceRecord>> byThread = new LinkedHashMap<>();
         for (TraceRecord record : records) {
-            String frameName = record.className() + "#" + record.methodName();
-            long durationMicros = record.durationNanos() / 1_000;
+            byThread.computeIfAbsent(record.threadId(), id -> new ArrayList<>()).add(record);
+        }
 
-            FlameGraphNode child = root.getOrCreateChild(frameName);
-            child.addValue(durationMicros);
-            root.addValue(durationMicros);
+        for (List<TraceRecord> threadRecords : byThread.values()) {
+            Deque<FlameGraphNode> stack = new ArrayDeque<>();
+            stack.push(root);
+
+            // Newest → oldest: outermost / later siblings first, then nested children
+            for (int i = threadRecords.size() - 1; i >= 0; i--) {
+                TraceRecord record = threadRecords.get(i);
+                int depth = Math.max(0, record.depth());
+                while (stack.size() > depth + 1) {
+                    stack.pop();
+                }
+                FlameGraphNode parent = stack.peek();
+                if (parent == null) {
+                    parent = root;
+                    stack.clear();
+                    stack.push(root);
+                }
+
+                String frameName = record.className() + "#" + record.methodName();
+                long durationMicros = record.durationNanos() / 1_000;
+
+                FlameGraphNode child = parent.getOrCreateChild(frameName);
+                child.addValue(durationMicros);
+                if (depth == 0) {
+                    root.addValue(durationMicros);
+                }
+                stack.push(child);
+            }
         }
 
         return root;

@@ -588,7 +588,7 @@ POST /api/trace/start  { "type": "sample", "interval": 10 }
 └─────────────────────────┘  兼容 d3-flame-graph
 ```
 
-**采样过滤**：守护线程和名称以 `joltvm-` 开头的线程会被排除在采样之外，避免 JoltVM 自身开销污染火焰图。
+**采样过滤**：默认包含守护线程（`includeDaemon=true`）；名称以 `joltvm-` 开头的线程仍会被排除，避免 JoltVM 自身开销污染火焰图。JDK 栈采样存在 safepoint bias，生产精确分析请优先使用下方 async-profiler。
 
 #### 火焰图数据模型
 
@@ -711,13 +711,13 @@ JoltVM 提供安全的 OGNL 表达式引擎，用于运行时对象检查。四�
 
 *（Phase 14 — 已实现）*
 
-支持多个并发方法观察会话（最多 10 个）。每个 `WatchSession` 拥有独立的 Byte Buddy `ResettableClassFileTransformer`。OGNL 上下文变量：`#args`、`#returnObj`、`#throwExp`、`#cost`、`#target`、`#clazz`。会话在可配置的持续时间后自动过期（默认 60 秒，最大 5 分钟）。
+支持多个并发方法观察会话（最多 10 个）。每个 `WatchSession` 拥有独立的 Byte Buddy `ResettableClassFileTransformer`。可选的 `conditionExpr` 经同一 OGNL 沙箱在服务端编译求值（`OgnlService.evaluateCondition`）。OGNL 上下文变量：`#args`、`#returnObj`、`#throwExp`、`#cost`、`#target`、`#clazz`。会话在可配置的持续时间后自动过期（默认 60 秒，最大 5 分钟）。
 
 ### WebSocket 实时推送
 
 *（Phase 16 — 已实现）*
 
-Netty 管道包含 `WebSocketServerProtocolHandler`（路径 `/ws`）。基于 JSON 的发布/订阅协议，支持频道：`threads.top`（5 秒）、`gc.stats`（10 秒）、`jvm.memory`（5 秒）。`SubscriptionManager` 管理每频道订阅并定期推送数据。客户端 `websocket.js` 提供自动重连（指数退避）和 REST 降级回退。
+Netty 管道在安全开启时先经 `WebSocketAuthHandler` 校验 `?token=`，再进入 `WebSocketServerProtocolHandler`（路径 `/ws`）。基于 JSON 的发布/订阅协议，支持频道：`threads.top`（5 秒）、`gc.stats`（10 秒）、`jvm.memory`（5 秒）。`SubscriptionManager` 管理每频道订阅并定期推送数据。客户端 `websocket.js` 提供自动重连（指数退避）和 REST 降级回退。
 
 ### Plugin/SPI 扩展机制
 
@@ -731,6 +731,8 @@ Netty 管道包含 `WebSocketServerProtocolHandler`（路径 `/ws`）。基于 J
 
 参见上方 [joltvm-tunnel](#joltvm-tunnel) 模块。Tunnel 支持在无需开放入站端口的情况下诊断防火墙或 Kubernetes Pod 内的 JVM。
 
+**鉴权分层：** `--token` 用于 Agent 注册；`--access-token` 用于 HTTP 仪表盘/代理（Bearer 或 query）。Agent 侧 TLS 默认使用 JVM 信任库；私有 CA 使用 `tunnelTrustCert`，仅开发环境可设 `tunnelInsecureSkipVerify=true`。
+
 ```
 Agent → TunnelClient → 出站 WS → TunnelServer → AgentRegistry
                                         ↕
@@ -738,6 +740,10 @@ Agent → TunnelClient → 出站 WS → TunnelServer → AgentRegistry
                                         ↕
 Agent → WS 响应 → RequestCorrelator.complete() → HTTP 响应 → 用户
 ```
+
+### 发行打包
+
+规范 Agent JAR 由 `joltvm-distribution` 构建（`./gradlew :joltvm-distribution:shadowJar` → `joltvm-agent-*-all.jar`），合并 agent + server 并重定位依赖。CLI `attach` 内嵌该 JAR。CI 执行 `:joltvm-distribution:verifyShadowJar`。
 
 ---
 

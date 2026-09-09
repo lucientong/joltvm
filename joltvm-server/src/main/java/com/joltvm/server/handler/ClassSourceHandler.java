@@ -19,12 +19,16 @@ package com.joltvm.server.handler;
 import com.joltvm.agent.InstrumentationHolder;
 import com.joltvm.server.HttpResponseHelper;
 import com.joltvm.server.RouteHandler;
+import com.joltvm.server.classloader.AmbiguousClassException;
+import com.joltvm.server.classloader.ClassLoaderService;
 import com.joltvm.server.decompile.DecompileService;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.QueryStringDecoder;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -33,16 +37,16 @@ import java.util.logging.Logger;
  * Handler for {@code GET /api/classes/{className}/source} — decompiles a loaded class
  * and returns its Java source code.
  *
- * <p>Uses the CFR decompiler to convert bytecode back to readable Java source.
- * The bytecode is obtained from the target JVM's loaded classes via the
- * Instrumentation API.
+ * <p>Optional query parameter {@code classLoaderId} disambiguates when the same FQCN
+ * is loaded by multiple ClassLoaders (HTTP 409 + candidates on conflict).
  *
  * <p>Response format:
  * <pre>
  * {
  *   "className": "com.example.MyClass",
  *   "source": "package com.example;\n\npublic class MyClass {\n  ...\n}",
- *   "decompiler": "CFR"
+ *   "decompiler": "CFR",
+ *   "classLoaderId": "12345678"
  * }
  * </pre>
  */
@@ -73,26 +77,43 @@ public final class ClassSourceHandler implements RouteHandler {
                     "Instrumentation not available");
         }
 
-        // Find the class
-        Class<?> targetClass = ClassFinder.findClass(className);
-        if (targetClass == null) {
-            return HttpResponseHelper.notFound("Class not found: " + className);
-        }
+        QueryStringDecoder decoder = new QueryStringDecoder(request.uri());
+        String classLoaderId = getParam(decoder, "classLoaderId");
 
-        // Decompile
         try {
+            Class<?> targetClass = ClassFinder.findClass(className, classLoaderId);
+            if (targetClass == null) {
+                return HttpResponseHelper.notFound("Class not found: " + className
+                        + (classLoaderId != null ? " (classLoaderId=" + classLoaderId + ")" : ""));
+            }
+
             String source = decompileService.decompile(targetClass);
 
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("className", className);
             result.put("source", source);
             result.put("decompiler", "CFR");
+            result.put("classLoaderId", ClassLoaderService.getLoaderId(targetClass.getClassLoader()));
 
             return HttpResponseHelper.json(result);
+        } catch (AmbiguousClassException e) {
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("error", e.getMessage());
+            response.put("className", e.getClassName());
+            response.put("candidates", e.getCandidates());
+            return HttpResponseHelper.json(HttpResponseStatus.CONFLICT, response);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Failed to decompile class: " + className, e);
             return HttpResponseHelper.serverError("Failed to decompile the requested class.");
         }
     }
 
+    private static String getParam(QueryStringDecoder decoder, String key) {
+        List<String> values = decoder.parameters().get(key);
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        String v = values.get(0);
+        return (v == null || v.isBlank()) ? null : v;
+    }
 }

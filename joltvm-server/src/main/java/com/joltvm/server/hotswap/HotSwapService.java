@@ -17,6 +17,9 @@
 package com.joltvm.server.hotswap;
 
 import com.joltvm.agent.InstrumentationHolder;
+import com.joltvm.server.classloader.AmbiguousClassException;
+import com.joltvm.server.classloader.ClassLoaderService;
+import com.joltvm.server.classloader.LoadedClassResolver;
 
 import java.lang.instrument.ClassDefinition;
 import java.lang.instrument.Instrumentation;
@@ -24,7 +27,9 @@ import java.lang.instrument.UnmodifiableClassException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,21 +45,9 @@ import java.util.logging.Logger;
  * bytecode before applying changes, and maintains an audit trail of all operations
  * via {@link HotSwapRecord}.
  *
- * <h3>Hot-Swap Flow:</h3>
- * <ol>
- *   <li>Validate: check that the target class exists and redefine is supported</li>
- *   <li>Backup: save the original bytecode (first time only)</li>
- *   <li>Redefine: apply new bytecode via {@code Instrumentation.redefineClasses()}</li>
- *   <li>Record: log the operation to history</li>
- * </ol>
- *
- * <h3>Rollback Flow:</h3>
- * <ol>
- *   <li>Retrieve backed-up original bytecode</li>
- *   <li>Redefine: re-apply original bytecode</li>
- *   <li>Remove backup entry</li>
- *   <li>Record: log the rollback to history</li>
- * </ol>
+ * <p>Supports ClassLoader-disambiguated resolve via {@code classLoaderId}, and
+ * batch redefinition of compiled outer + inner classes in a single
+ * {@link Instrumentation#redefineClasses} call.
  *
  * <p>Thread-safe: uses {@link LinkedBlockingDeque} for bounded history and per-class
  * {@link ReentrantLock} to serialize concurrent hot-swap / rollback on the same class.
@@ -82,58 +75,49 @@ public class HotSwapService {
         this.backupService = backupService;
     }
 
-    /**
-     * Performs a hot-swap: redefines a loaded class with new bytecode.
-     *
-     * @param className   the fully qualified class name
-     * @param newBytecode the new bytecode to apply
-     * @return the hot-swap record
-     * @throws HotSwapException if the operation fails
-     */
     public HotSwapRecord hotSwap(String className, byte[] newBytecode) {
-        return hotSwap(className, newBytecode, null, null);
+        return hotSwap(className, newBytecode, null, null, null, null);
     }
 
-    /**
-     * Performs a hot-swap with operator tracking.
-     *
-     * @param className   the fully qualified class name
-     * @param newBytecode the new bytecode to apply
-     * @param operator    the user performing the operation (may be null)
-     * @param reason      the reason for the hot-swap (may be null)
-     * @return the hot-swap record
-     */
     public HotSwapRecord hotSwap(String className, byte[] newBytecode,
                                   String operator, String reason) {
-        return hotSwap(className, newBytecode, operator, reason, null);
+        return hotSwap(className, newBytecode, operator, reason, null, null);
+    }
+
+    public HotSwapRecord hotSwap(String className, byte[] newBytecode,
+                                  String operator, String reason, String precomputedDiff) {
+        return hotSwap(className, newBytecode, operator, reason, precomputedDiff, null);
     }
 
     /**
-     * Performs a hot-swap with operator tracking and a pre-computed diff.
+     * Performs a hot-swap with optional ClassLoader disambiguation.
      *
-     * @param className        the fully qualified class name
-     * @param newBytecode      the new bytecode to apply
-     * @param operator         the user performing the operation (may be null)
-     * @param reason           the reason for the hot-swap (may be null)
-     * @param precomputedDiff  a unified diff string computed by the caller (may be null)
+     * @param className        fully qualified class name
+     * @param newBytecode      new bytecode
+     * @param operator         optional operator
+     * @param reason           optional reason
+     * @param precomputedDiff  optional unified diff
+     * @param classLoaderId    optional ClassLoader id ({@link ClassLoaderService#getLoaderId})
      * @return the hot-swap record
+     * @throws AmbiguousClassException if multiple loaders match and no id was given
      */
     public HotSwapRecord hotSwap(String className, byte[] newBytecode,
-                                  String operator, String reason, String precomputedDiff) {
+                                  String operator, String reason, String precomputedDiff,
+                                  String classLoaderId) {
         ReentrantLock lock = classLocks.computeIfAbsent(className, k -> new ReentrantLock());
         lock.lock();
         try {
-            return doHotSwap(className, newBytecode, operator, reason, precomputedDiff);
+            return doHotSwap(className, newBytecode, operator, reason, precomputedDiff, classLoaderId);
         } finally {
             lock.unlock();
         }
     }
 
     private HotSwapRecord doHotSwap(String className, byte[] newBytecode,
-                                     String operator, String reason, String precomputedDiff) {
+                                     String operator, String reason, String precomputedDiff,
+                                     String classLoaderId) {
         Instrumentation inst = InstrumentationHolder.get();
 
-        // 1. Validate redefine support
         if (!inst.isRedefineClassesSupported()) {
             HotSwapRecord record = createRecord(className, HotSwapRecord.Action.HOTSWAP,
                     HotSwapRecord.Status.FAILED, "Class redefinition is not supported by this JVM");
@@ -141,16 +125,15 @@ public class HotSwapService {
             return record;
         }
 
-        // 2. Find the target class
-        Class<?> targetClass = findLoadedClass(className, inst);
+        Class<?> targetClass = LoadedClassResolver.resolve(className, classLoaderId);
         if (targetClass == null) {
             HotSwapRecord record = createRecord(className, HotSwapRecord.Action.HOTSWAP,
-                    HotSwapRecord.Status.FAILED, "Class not found among loaded classes: " + className);
+                    HotSwapRecord.Status.FAILED, "Class not found among loaded classes: " + className
+                            + (classLoaderId != null ? " (classLoaderId=" + classLoaderId + ")" : ""));
             addHistory(record);
             return record;
         }
 
-        // 3. Check if class is modifiable
         if (!inst.isModifiableClass(targetClass)) {
             HotSwapRecord record = createRecord(className, HotSwapRecord.Action.HOTSWAP,
                     HotSwapRecord.Status.FAILED, "Class is not modifiable: " + className);
@@ -158,24 +141,24 @@ public class HotSwapService {
             return record;
         }
 
-        // 4. Backup original bytecode (first time only)
         try {
             backupService.backup(targetClass);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Failed to backup bytecode for " + className, e);
-            // Continue with hot-swap even if backup fails — warn the user
         }
 
-        // 5. Apply the hot-swap
         try {
             ClassDefinition definition = new ClassDefinition(targetClass, newBytecode);
             inst.redefineClasses(definition);
 
-            // Use pre-computed diff if available, otherwise fall back to byte summary
             String diff = precomputedDiff;
             if (diff == null) {
                 diff = "Bytecode replaced: " + newBytecode.length + " bytes";
-                Optional<byte[]> originalBackup = backupService.getBackup(className);
+                Optional<byte[]> originalBackup = backupService.getBackup(
+                        ClassLoaderService.getLoaderId(targetClass.getClassLoader()), className);
+                if (originalBackup.isEmpty()) {
+                    originalBackup = backupService.getBackup(className);
+                }
                 if (originalBackup.isPresent()) {
                     diff = "Original: " + originalBackup.get().length + " bytes → New: "
                             + newBytecode.length + " bytes";
@@ -193,7 +176,8 @@ public class HotSwapService {
         } catch (UnsupportedOperationException e) {
             HotSwapRecord record = createRecord(className, HotSwapRecord.Action.HOTSWAP,
                     HotSwapRecord.Status.FAILED,
-                    "Structural change not supported: " + e.getMessage());
+                    "Structural change not supported: " + e.getMessage()
+                            + ". JVM redefine cannot add/remove methods or fields.");
             addHistory(record);
             return record;
         } catch (ClassFormatError e) {
@@ -218,41 +202,196 @@ public class HotSwapService {
     }
 
     /**
-     * Rolls back a previously hot-swapped class to its original bytecode.
+     * Result of a batch hot-swap spanning an outer class and its compiled companions
+     * (named inner classes, anonymous classes, etc.).
      *
-     * @param className the fully qualified class name
-     * @return the rollback record
-     * @throws HotSwapException if the operation fails
+     * @param success     whether the atomic redefine succeeded (or nothing to redefine)
+     * @param primaryRecord history record for the primary class (may be synthetic)
+     * @param redefined   class names successfully redefined
+     * @param skipped     skipped entries with reason
+     * @param message     summary message
      */
-    public HotSwapRecord rollback(String className) {
-        return rollback(className, null, null);
-    }
+    public record BatchHotSwapResult(
+            boolean success,
+            HotSwapRecord primaryRecord,
+            List<String> redefined,
+            List<Map<String, String>> skipped,
+            String message
+    ) {}
 
     /**
-     * Rolls back with operator tracking.
+     * Backs up all eligible loaded classes from {@code bytecodeMap}, then applies a
+     * single atomic {@code redefineClasses} call.
      *
-     * <p>Serialized per class name to prevent races with concurrent hotSwap calls.
+     * <p>Classes that are not loaded, not modifiable, or otherwise ineligible are
+     * listed under {@code skipped} with a reason (e.g. anonymous {@code $1} not yet loaded).
      *
-     * @param className the fully qualified class name
-     * @param operator  the user performing the rollback (may be null)
-     * @param reason    the reason for rollback (may be null)
-     * @return the rollback record
+     * @param bytecodeMap   compiled class name → bytecode (includes inner classes)
+     * @param primaryClass  the primary class name from the API request
+     * @param classLoaderId optional ClassLoader id for resolve
+     * @param operator      optional operator
+     * @param reason        optional reason
+     * @param precomputedDiff optional diff for the primary class
+     * @return batch result with redefined / skipped lists
+     * @throws AmbiguousClassException if the primary class is ambiguous without loader id
      */
-    public HotSwapRecord rollback(String className, String operator, String reason) {
-        ReentrantLock lock = classLocks.computeIfAbsent(className, k -> new ReentrantLock());
+    public BatchHotSwapResult hotSwapBatch(Map<String, byte[]> bytecodeMap,
+                                            String primaryClass,
+                                            String classLoaderId,
+                                            String operator,
+                                            String reason,
+                                            String precomputedDiff) {
+        Instrumentation inst = InstrumentationHolder.get();
+
+        if (!inst.isRedefineClassesSupported()) {
+            HotSwapRecord record = createRecord(primaryClass, HotSwapRecord.Action.HOTSWAP,
+                    HotSwapRecord.Status.FAILED, "Class redefinition is not supported by this JVM");
+            addHistory(record);
+            return new BatchHotSwapResult(false, record, List.of(), List.of(), record.message());
+        }
+
+        // Resolve primary first so ambiguous primary fails fast with 409 at handler layer
+        Class<?> primaryResolved = LoadedClassResolver.resolve(primaryClass, classLoaderId);
+        if (primaryResolved == null) {
+            HotSwapRecord record = createRecord(primaryClass, HotSwapRecord.Action.HOTSWAP,
+                    HotSwapRecord.Status.FAILED, "Class not found among loaded classes: " + primaryClass
+                            + (classLoaderId != null ? " (classLoaderId=" + classLoaderId + ")" : ""));
+            addHistory(record);
+            return new BatchHotSwapResult(false, record, List.of(), List.of(), record.message());
+        }
+
+        String lockName = primaryClass;
+        ReentrantLock lock = classLocks.computeIfAbsent(lockName, k -> new ReentrantLock());
         lock.lock();
         try {
-            return doRollback(className, operator, reason);
+            List<String> redefined = new ArrayList<>();
+            List<Map<String, String>> skipped = new ArrayList<>();
+            List<ClassDefinition> definitions = new ArrayList<>();
+            List<Class<?>> toBackup = new ArrayList<>();
+
+            for (Map.Entry<String, byte[]> entry : bytecodeMap.entrySet()) {
+                String name = entry.getKey();
+                byte[] bytes = entry.getValue();
+
+                Class<?> target;
+                try {
+                    target = LoadedClassResolver.resolve(name, classLoaderId);
+                } catch (AmbiguousClassException e) {
+                    // Non-primary ambiguous without id — skip with reason (primary already validated)
+                    skipped.add(skippedEntry(name, "ambiguous ClassLoader; specify classLoaderId"));
+                    continue;
+                }
+
+                if (target == null) {
+                    skipped.add(skippedEntry(name, "not loaded (anonymous/inner class may not be initialized yet)"));
+                    continue;
+                }
+                if (!inst.isModifiableClass(target)) {
+                    skipped.add(skippedEntry(name, "class is not modifiable"));
+                    continue;
+                }
+
+                toBackup.add(target);
+                definitions.add(new ClassDefinition(target, bytes));
+                redefined.add(name);
+            }
+
+            if (definitions.isEmpty()) {
+                HotSwapRecord record = createRecord(primaryClass, HotSwapRecord.Action.HOTSWAP,
+                        HotSwapRecord.Status.FAILED,
+                        "No loaded redefinable classes found in compile output for " + primaryClass);
+                addHistory(record);
+                return new BatchHotSwapResult(false, record, List.of(), skipped, record.message());
+            }
+
+            // Full backup before atomic redefine
+            for (Class<?> clazz : toBackup) {
+                try {
+                    backupService.backup(clazz);
+                } catch (Exception e) {
+                    LOG.log(Level.WARNING, "Failed to backup bytecode for " + clazz.getName(), e);
+                }
+            }
+
+            try {
+                inst.redefineClasses(definitions.toArray(ClassDefinition[]::new));
+
+                String msg = "Successfully redefined " + redefined.size() + " class(es)"
+                        + (skipped.isEmpty() ? "" : ", skipped " + skipped.size());
+                HotSwapRecord record = createRecord(primaryClass, HotSwapRecord.Action.HOTSWAP,
+                        HotSwapRecord.Status.SUCCESS, msg, operator, reason, precomputedDiff);
+                addHistory(record);
+                LOG.info("Batch hot-swap successful: " + redefined);
+                return new BatchHotSwapResult(true, record, List.copyOf(redefined), List.copyOf(skipped), msg);
+
+            } catch (UnsupportedOperationException e) {
+                String msg = "Structural change not supported: " + e.getMessage()
+                        + ". JVM redefine cannot add/remove methods or fields.";
+                HotSwapRecord record = createRecord(primaryClass, HotSwapRecord.Action.HOTSWAP,
+                        HotSwapRecord.Status.FAILED, msg, operator, reason, null);
+                addHistory(record);
+                return new BatchHotSwapResult(false, record, List.of(), List.copyOf(skipped), msg);
+            } catch (ClassFormatError e) {
+                String msg = "Invalid class format: " + e.getMessage();
+                HotSwapRecord record = createRecord(primaryClass, HotSwapRecord.Action.HOTSWAP,
+                        HotSwapRecord.Status.FAILED, msg, operator, reason, null);
+                addHistory(record);
+                return new BatchHotSwapResult(false, record, List.of(), List.copyOf(skipped), msg);
+            } catch (UnmodifiableClassException e) {
+                String msg = "Class cannot be modified: " + e.getMessage();
+                HotSwapRecord record = createRecord(primaryClass, HotSwapRecord.Action.HOTSWAP,
+                        HotSwapRecord.Status.FAILED, msg, operator, reason, null);
+                addHistory(record);
+                return new BatchHotSwapResult(false, record, List.of(), List.copyOf(skipped), msg);
+            } catch (Exception e) {
+                String msg = "Hot-swap failed: " + e.getMessage();
+                HotSwapRecord record = createRecord(primaryClass, HotSwapRecord.Action.HOTSWAP,
+                        HotSwapRecord.Status.FAILED, msg, operator, reason, null);
+                addHistory(record);
+                return new BatchHotSwapResult(false, record, List.of(), List.copyOf(skipped), msg);
+            }
         } finally {
             lock.unlock();
         }
     }
 
-    private HotSwapRecord doRollback(String className, String operator, String reason) {
+    private static Map<String, String> skippedEntry(String className, String reason) {
+        Map<String, String> m = new LinkedHashMap<>();
+        m.put("className", className);
+        m.put("reason", reason);
+        return m;
+    }
+
+    public HotSwapRecord rollback(String className) {
+        return rollback(className, null, null, null);
+    }
+
+    public HotSwapRecord rollback(String className, String operator, String reason) {
+        return rollback(className, operator, reason, null);
+    }
+
+    public HotSwapRecord rollback(String className, String operator, String reason, String classLoaderId) {
+        ReentrantLock lock = classLocks.computeIfAbsent(className, k -> new ReentrantLock());
+        lock.lock();
+        try {
+            return doRollback(className, operator, reason, classLoaderId);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private HotSwapRecord doRollback(String className, String operator, String reason, String classLoaderId) {
         Instrumentation inst = InstrumentationHolder.get();
 
-        // 1. Check backup exists
-        Optional<byte[]> backup = backupService.getBackup(className);
+        Optional<byte[]> backup;
+        if (classLoaderId != null && !classLoaderId.isBlank()) {
+            backup = backupService.getBackup(classLoaderId, className);
+            if (backup.isEmpty()) {
+                backup = backupService.getBackup(className);
+            }
+        } else {
+            backup = backupService.getBackup(className);
+        }
         if (backup.isEmpty()) {
             HotSwapRecord record = createRecord(className, HotSwapRecord.Action.ROLLBACK,
                     HotSwapRecord.Status.FAILED,
@@ -261,8 +400,7 @@ public class HotSwapService {
             return record;
         }
 
-        // 2. Find the target class
-        Class<?> targetClass = findLoadedClass(className, inst);
+        Class<?> targetClass = LoadedClassResolver.resolve(className, classLoaderId);
         if (targetClass == null) {
             HotSwapRecord record = createRecord(className, HotSwapRecord.Action.ROLLBACK,
                     HotSwapRecord.Status.FAILED,
@@ -271,14 +409,15 @@ public class HotSwapService {
             return record;
         }
 
-        // 3. Apply the rollback
         byte[] originalBytecode = backup.get();
         try {
             ClassDefinition definition = new ClassDefinition(targetClass, originalBytecode);
             inst.redefineClasses(definition);
 
-            // Remove backup after successful rollback
-            backupService.removeBackup(className);
+            String key = BytecodeBackupService.backupKey(targetClass);
+            if (!backupService.removeBackup(key)) {
+                backupService.removeBackup(className);
+            }
 
             String diff = "Restored original bytecode: " + originalBytecode.length + " bytes";
             HotSwapRecord record = createRecord(className, HotSwapRecord.Action.ROLLBACK,
@@ -298,32 +437,16 @@ public class HotSwapService {
         }
     }
 
-    /**
-     * Returns the list of classes that have been hot-swapped and can be rolled back.
-     *
-     * @return unmodifiable set of class names with backups
-     */
     public java.util.Set<String> getRollbackableClasses() {
         return backupService.getBackedUpClasses();
     }
 
-    /**
-     * Returns the operation history, newest first.
-     *
-     * @return unmodifiable list of hot-swap records
-     */
     public List<HotSwapRecord> getHistory() {
         List<HotSwapRecord> snapshot = new ArrayList<>(history);
         Collections.reverse(snapshot);
         return Collections.unmodifiableList(snapshot);
     }
 
-    /**
-     * Returns the operation history, newest first, limited to the specified count.
-     *
-     * @param limit maximum number of records to return
-     * @return unmodifiable list of hot-swap records
-     */
     public List<HotSwapRecord> getHistory(int limit) {
         List<HotSwapRecord> all = getHistory();
         if (limit >= all.size()) {
@@ -332,22 +455,8 @@ public class HotSwapService {
         return all.subList(0, limit);
     }
 
-    /**
-     * Returns the backup service for direct access (e.g., checking backup status).
-     *
-     * @return the backup service
-     */
     public BytecodeBackupService getBackupService() {
         return backupService;
-    }
-
-    private Class<?> findLoadedClass(String className, Instrumentation inst) {
-        for (Class<?> clazz : inst.getAllLoadedClasses()) {
-            if (clazz.getName().equals(className)) {
-                return clazz;
-            }
-        }
-        return null;
     }
 
     private HotSwapRecord createRecord(String className, HotSwapRecord.Action action,
@@ -372,7 +481,6 @@ public class HotSwapService {
     }
 
     private void addHistory(HotSwapRecord record) {
-        // If deque is full, remove the oldest entry to make room
         while (!history.offerLast(record)) {
             history.pollFirst();
         }

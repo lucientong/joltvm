@@ -118,4 +118,29 @@ class AttachHelperTest {
             assertFalse(descriptor.id().isBlank(), "Process descriptor ID should not be blank");
         }
     }
+
+    // ========================================================================
+    // Agent JAR validation
+    // ========================================================================
+
+    @Test
+    @DisplayName("validateAgentJar with missing file throws IllegalStateException")
+    void validateAgentJar_missingFile_throws() {
+        IllegalStateException ex = assertThrows(
+                IllegalStateException.class,
+                () -> AttachHelper.validateAgentJar(new java.io.File("/tmp/joltvm-does-not-exist.jar"))
+        );
+        assertTrue(ex.getMessage().contains("not found"));
+    }
+
+    @Test
+    @DisplayName("hasAgentClass returns false for non-jar path")
+    void hasAgentClass_nonJar_returnsFalse() throws Exception {
+        java.nio.file.Path tmp = java.nio.file.Files.createTempFile("not-an-agent", ".txt");
+        try {
+            assertFalse(AttachHelper.hasAgentClass(tmp.toFile()));
+        } finally {
+            java.nio.file.Files.deleteIfExists(tmp);
+        }
+    }
 }

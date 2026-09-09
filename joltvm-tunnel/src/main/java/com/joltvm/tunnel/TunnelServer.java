@@ -72,6 +72,7 @@ public class TunnelServer {
     private final int port;
     private final AgentRegistry registry;
     private final RequestCorrelator correlator;
+    private final AccessTokenStore accessTokens;
     private final SslContext sslContext;
     private final String version;
 
@@ -91,6 +92,7 @@ public class TunnelServer {
         this.port = port;
         this.registry = new AgentRegistry();
         this.correlator = new RequestCorrelator();
+        this.accessTokens = new AccessTokenStore();
         this.sslContext = buildSslContext(tlsCertPath, tlsKeyPath);
         this.version = loadVersion();
     }
@@ -102,6 +104,19 @@ public class TunnelServer {
      */
     public void addRegistrationToken(String token) {
         registry.addToken(token);
+    }
+
+    /**
+     * Adds a pre-shared HTTP access token for dashboard / proxy APIs.
+     *
+     * @param token the access token
+     */
+    public void addAccessToken(String token) {
+        accessTokens.addToken(token);
+    }
+
+    public AccessTokenStore getAccessTokens() {
+        return accessTokens;
     }
 
     /**
@@ -136,7 +151,7 @@ public class TunnelServer {
                                     new ChunkedWriteHandler(),
                                     new WebSocketServerProtocolHandler("/ws/agent", null, true),
                                     new AgentWebSocketHandler(registry, correlator),
-                                    new TunnelHttpHandler(registry, correlator, version)
+                                    new TunnelHttpHandler(registry, correlator, version, accessTokens)
                             );
                         }
                     });
