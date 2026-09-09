@@ -18,7 +18,7 @@ JoltVM 是一个 JVM 在线诊断与热修复框架。通过 Java Agent 附着�
 
 ## ✨ 功能特性
 
-> JoltVM 正在积极开发中。Phase 1 至 Phase 17 已完成；v1.1.0 新增发行打包、安全、生命周期、诊断准确性与多 ClassLoader 热替换加固。完整计划参见[路线图](#-路线图)。
+> JoltVM 正在积极开发中。Phase 1 至 Phase 17 已完成；v1.2.0 默认采用安全网络绑定，并增加真实发布物 smoke 门禁。完整计划参见[路线图](#-路线图)。
 
 ### 🖥️ 浏览器端 Web IDE
 不再需要记忆 50+ 条命令。可视化界面集成 Monaco Editor 代码编辑器、实时日志流、类和方法树导航。在线编辑代码并直接热修复。
@@ -33,7 +33,7 @@ JoltVM 是一个 JVM 在线诊断与热修复框架。通过 Java Agent 附着�
 列出所有 Spring Bean，支持过滤和分页。解析 `@RequestMapping` 端点，展示 URL → 方法映射。分析 `@Controller → @Service → @Repository` 依赖注入调用链，支持循环依赖检测。零编译期 Spring 依赖 —— 通过反射实现，兼容 Spring Boot 2.x/3.x。
 
 ### 🔒 安全审计
-基于 HMAC-SHA256 的令牌认证，三级 RBAC 角色控制（Viewer / Operator / Admin）。认证中间件对每个 API 请求进行权限检查。每次热修复生成包含时间戳、操作人、原因和差异的审计条目。不可篡改的审计日志，支持 JSON Lines 和 CSV 格式导出。安全功能可关闭以便开发使用。
+基于 HMAC-SHA256 的令牌认证，三级 RBAC 角色控制（Viewer / Operator / Admin）。认证中间件对每个 API 请求进行权限检查。每次热修复生成包含时间戳、操作人、原因和差异的审计条目。不可篡改的审计日志，支持 JSON Lines 和 CSV 格式导出。服务默认仅绑定 `127.0.0.1`；非本地绑定必须启用认证，除非显式使用仅限开发环境的危险开关。
 
 ### 🌐 远程诊断 (Tunnel)
 无需开放入站端口，即可诊断防火墙或 Kubernetes Pod 内的 JVM。Agent 主动向独立的 Tunnel Server 发起 WebSocket 出站连接。用户通过 Tunnel 的 HTTP API 和内置仪表盘访问远程 Agent。支持预共享 Token 注册和 TLS 加密通信。
@@ -80,8 +80,10 @@ java -javaagent:joltvm-distribution/build/libs/joltvm-agent-*-all.jar=port=7758,
 | 参数名          | 默认值                              | 说明                                                             |
 |-----------------|-------------------------------------|------------------------------------------------------------------|
 | `port`          | `7758`                              | 内嵌 Web 服务器监听端口                                         |
+| `bindAddress`   | `127.0.0.1`                         | 绑定地址；非本地地址要求 `security=true`                       |
 | `security`      | `false`                             | 是否启用认证（`true` / `false`）                               |
-| `adminPassword` | `joltvm`                            | 初始管理员密码（以加盐 SHA-256 哈希存储）。使用默认密码时，首次登录后将提示修改。 |
+| `adminPassword` | `joltvm`                            | 初始管理员密码（使用 PBKDF2-SHA256 存储）。使用默认密码时，首次登录后将提示修改。 |
+| `allowInsecureRemote` | `false`                       | 允许无认证的非本地绑定；危险，仅限开发环境                     |
 | `auditFile`     | `$TMPDIR/joltvm-audit.jsonl`        | 审计日志持久化路径（JSON Lines 格式）                          |
 | `tlsCert`       | *(无)*                              | TLS 证书路径（PEM 格式）——设置后自动启用 HTTPS                |
 | `tlsKey`        | *(无)*                              | TLS 私钥路径（PEM 格式）——设置 `tlsCert` 时必填               |
@@ -139,17 +141,24 @@ JoltVM 由以下模块组成（详见[架构文档](docs/zh/architecture.md)）�
 
 ### Maven Central
 
+主 artifact 是供 API 使用的 thin Agent 库（不要将该 JAR 传给
+`-javaagent`）：
+
 ```xml
 <dependency>
     <groupId>io.github.lucientong</groupId>
     <artifactId>joltvm-agent</artifactId>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
 </dependency>
 ```
 
-```kotlin
-// Gradle Kotlin DSL
-implementation("io.github.lucientong:joltvm-agent:1.1.0")
+可直接运行的 Agent 发行物使用 `all` classifier。请只下载该 fat JAR，避免
+加入应用 classpath：
+
+```bash
+mvn dependency:copy \
+  -Dartifact=io.github.lucientong:joltvm-agent:1.2.0:jar:all \
+  -DoutputDirectory=.
 ```
 
 ---
@@ -164,8 +173,9 @@ Tunnel Server 支持诊断防火墙或 Kubernetes Pod 内的 JVM，无需开放�
 # 在默认端口 8800 启动
 java -jar joltvm-tunnel/build/libs/joltvm-tunnel-*-all.jar
 
-# Agent 注册令牌 + HTTP 访问令牌（生产环境推荐）
+# 远程绑定必须同时配置 Agent 注册令牌与 HTTP 访问令牌
 java -jar joltvm-tunnel/build/libs/joltvm-tunnel-*-all.jar \
+  --bind-address=0.0.0.0 \
   --token=SECRET1 --token=SECRET2 \
   --access-token=HTTP_SECRET
 
@@ -184,7 +194,8 @@ java -javaagent:joltvm-agent.jar=tunnelServer=wss://tunnel.example.com:8800/ws/a
 
 ### 访问远程 Agent
 
-配置了 `--access-token` 时，需通过 `Authorization: Bearer <token>` 或 `?access_token=<token>` 传递。
+配置了 `--access-token` 时，需通过 `Authorization: Bearer <token>`、
+`X-Tunnel-Access-Token: <token>` 或 `?accessToken=<token>` 传递。
 
 - **仪表盘**: `http://tunnel-server:8800/`
 - **Agent 列表**: `GET http://tunnel-server:8800/api/tunnel/agents`

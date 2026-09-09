@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -61,6 +62,31 @@ class JoltVMServerTest {
     void customPort() {
         server = new JoltVMServer(9090);
         assertEquals(9090, server.getPort());
+        assertEquals("127.0.0.1", server.getBindAddress());
+    }
+
+    @Test
+    @DisplayName("non-loopback bind requires authentication by default")
+    void remoteBindRequiresAuthentication() {
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> new JoltVMServer(9090, Map.of("bindAddress", "0.0.0.0")));
+        assertTrue(error.getMessage().contains("security=true"));
+    }
+
+    @Test
+    @DisplayName("authenticated non-loopback bind is accepted")
+    void authenticatedRemoteBindAccepted() {
+        server = new JoltVMServer(9090,
+                Map.of("bindAddress", "0.0.0.0", "security", "true"));
+        assertEquals("0.0.0.0", server.getBindAddress());
+    }
+
+    @Test
+    @DisplayName("explicit dangerous override allows unauthenticated non-loopback bind")
+    void insecureRemoteOverrideAccepted() {
+        server = new JoltVMServer(9090,
+                Map.of("bindAddress", "0.0.0.0", "allowInsecureRemote", "true"));
+        assertEquals("0.0.0.0", server.getBindAddress());
     }
 
     @Test

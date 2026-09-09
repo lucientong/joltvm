@@ -217,8 +217,11 @@ public final class JoltVMAgent {
                 }
             }, "joltvm-shutdown"));
 
-            LOG.info(String.format("JoltVM Web IDE: http://localhost:%d", port));
-            LOG.info(String.format("JoltVM Health:  http://localhost:%d/api/health", port));
+            String bindAddress = agentArgs.getOrDefault("bindAddress", "127.0.0.1");
+            String scheme = agentArgs.containsKey("tlsCert") ? "https" : "http";
+            LOG.info(String.format("JoltVM Web IDE: %s://%s:%d", scheme, bindAddress, port));
+            LOG.info(String.format("JoltVM Health:  %s://%s:%d/api/health",
+                    scheme, bindAddress, port));
 
             // Start tunnel client if tunnelServer is configured
             startTunnelClient(port, agentArgs);

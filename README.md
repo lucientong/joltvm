@@ -18,7 +18,7 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ## ✨ Features
 
-> JoltVM is under active development. Phase 1 through Phase 17 are complete; v1.1.0 adds release packaging, security, lifecycle, diagnostics accuracy, and multi-ClassLoader hot-swap hardening. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 through Phase 17 are complete; v1.2.0 makes network binding secure by default and adds published-artifact smoke gates. See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, interactive flame graphs (d3-flame-graph), class/method tree navigation, Spring Boot bean browser, and audit dashboard. Edit code and apply hot-fixes visually — all served from the embedded Netty server at `http://localhost:7758`.
@@ -42,7 +42,7 @@ Auto-detects logging framework (Logback, Log4j2, JUL) via reflection with zero c
 Evaluate OGNL expressions against the running JVM in a secure sandbox. Four-layer defense-in-depth: pre-parse validation, MemberAccess class/method blacklist (60+ blocked classes), execution timeout (5s), and result depth limiting. 50+ known injection vectors tested and blocked.
 
 ### 🔒 Security & Audit
-HMAC-SHA256 token-based authentication with three-tier RBAC (Viewer / Operator / Admin). Authentication middleware enforces permissions on every API request. Every hot-fix generates an audit entry with timestamp, operator, reason, and diff. Immutable audit logs with JSON Lines and CSV export. Passwords secured with PBKDF2-SHA256 (310,000 iterations). Security can be disabled for development use.
+HMAC-SHA256 token-based authentication with three-tier RBAC (Viewer / Operator / Admin). Authentication middleware enforces permissions on every API request. Every hot-fix generates an audit entry with timestamp, operator, reason, and diff. Immutable audit logs with JSON Lines and CSV export. Passwords secured with PBKDF2-SHA256 (310,000 iterations). The server binds to `127.0.0.1` by default; remote binds require authentication unless an explicit development-only override is supplied.
 
 ### 🌐 Remote Diagnostics (Tunnel)
 Diagnose JVMs behind firewalls without opening inbound ports. The agent initiates an outbound WebSocket connection to a standalone tunnel server. Users access remote agents through the tunnel's HTTP API and built-in dashboard. Pre-shared tokens for agent registration. TLS supported for encrypted communication.
@@ -92,8 +92,10 @@ java -javaagent:joltvm-distribution/build/libs/joltvm-agent-*-all.jar=port=7758,
 | Argument        | Default                            | Description                                                  |
 |-----------------|-------------------------------------|--------------------------------------------------------------|
 | `port`          | `7758`                              | TCP port for the embedded web server                        |
+| `bindAddress`   | `127.0.0.1`                         | Bind address. Non-loopback values require `security=true` |
 | `security`      | `false`                             | Enable authentication (`true` / `false`)                   |
-| `adminPassword` | `joltvm`                            | Initial admin password (stored as salted SHA-256 hash). When using the default, you will be prompted to change it on first login. |
+| `adminPassword` | `joltvm`                            | Initial admin password (stored with PBKDF2-SHA256). When using the default, you will be prompted to change it on first login. |
+| `allowInsecureRemote` | `false`                       | Allow a non-loopback bind without auth; dangerous, development only |
 | `auditFile`     | `$TMPDIR/joltvm-audit.jsonl`        | Path for the persistent JSON Lines audit log               |
 | `tlsCert`       | *(none)*                            | Path to TLS certificate (PEM) — enables HTTPS when set    |
 | `tlsKey`        | *(none)*                            | Path to TLS private key (PEM) — required when `tlsCert` is set |
@@ -152,17 +154,24 @@ JoltVM consists of these modules (see [Architecture Doc](docs/en/architecture.md
 
 ### Maven Central
 
+The primary artifact is the thin Agent API library (do not pass this JAR to
+`-javaagent`):
+
 ```xml
 <dependency>
     <groupId>io.github.lucientong</groupId>
     <artifactId>joltvm-agent</artifactId>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
 </dependency>
 ```
 
-```kotlin
-// Gradle Kotlin DSL
-implementation("io.github.lucientong:joltvm-agent:1.1.0")
+The runnable Agent distribution is published under the `all` classifier. Download
+it without adding the fat JAR to your application classpath:
+
+```bash
+mvn dependency:copy \
+  -Dartifact=io.github.lucientong:joltvm-agent:1.2.0:jar:all \
+  -DoutputDirectory=.
 ```
 
 ---
@@ -216,8 +225,9 @@ The tunnel server enables diagnosing JVMs behind firewalls or in Kubernetes pods
 # Start tunnel server on default port 8800
 java -jar joltvm-tunnel/build/libs/joltvm-tunnel-*-all.jar
 
-# Agent registration tokens + HTTP access tokens (recommended for production)
+# Remote bind requires both Agent registration and HTTP access tokens
 java -jar joltvm-tunnel/build/libs/joltvm-tunnel-*-all.jar \
+  --bind-address=0.0.0.0 \
   --token=SECRET1 --token=SECRET2 \
   --access-token=HTTP_SECRET
 
@@ -236,7 +246,8 @@ java -javaagent:joltvm-agent.jar=tunnelServer=wss://tunnel.example.com:8800/ws/a
 
 ### Access Remote Agents
 
-When `--access-token` is configured, pass it as `Authorization: Bearer <token>` or `?access_token=<token>`.
+When `--access-token` is configured, pass it as `Authorization: Bearer <token>`,
+`X-Tunnel-Access-Token: <token>`, or `?accessToken=<token>`.
 
 - **Dashboard**: `http://tunnel-server:8800/`
 - **Agent list**: `GET http://tunnel-server:8800/api/tunnel/agents`

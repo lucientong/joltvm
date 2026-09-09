@@ -7,8 +7,8 @@
 #   3. Builds and pushes multi-platform Docker image to Docker Hub
 #   4. Creates GitHub Release with shadow JARs
 #
-# IMPORTANT: Tests are NOT run here. They are already validated by the CI
-# workflow on every push to master. Only push a tag after CI is green.
+# IMPORTANT: Release reruns the full test suite and published-path smoke tests.
+# This keeps a tag release safe even when the branch CI result is stale or absent.
 #
 # Required GitHub Secrets:
 #   MAVEN_CENTRAL_USERNAME  — Sonatype Central Portal user token username
@@ -92,8 +92,17 @@ jobs:
             exit 1
           fi
 
-      - name: Build (tests skipped — already verified by CI)
-        run: ./gradlew build -x test --no-daemon
+      - name: Build and test
+        run: ./gradlew build --no-daemon --warning-mode all
+
+      - name: Build shadow JARs for release assets
+        run: ./gradlew :joltvm-distribution:shadowJar :joltvm-cli:shadowJar :joltvm-tunnel:shadowJar --no-daemon
+
+      - name: Verify canonical agent fat JAR
+        run: ./gradlew :joltvm-distribution:verifyShadowJar --no-daemon
+
+      - name: Smoke test javaagent and CLI attach release paths
+        run: bash .github/scripts/release-smoke.sh
 
       - name: Publish to Maven Central (Sonatype Central Portal)
         run: ./gradlew publishToSonatype closeAndReleaseSonatypeStagingRepository --no-daemon
@@ -103,12 +112,6 @@ jobs:
           ORG_GRADLE_PROJECT_signingKeyId: ${{ secrets.SIGNING_KEY_ID }}
           ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.SIGNING_PASSWORD }}
           ORG_GRADLE_PROJECT_signingKey: ${{ secrets.SIGNING_KEY }}
-
-      - name: Build shadow JARs for release assets
-        run: ./gradlew :joltvm-distribution:shadowJar :joltvm-cli:shadowJar :joltvm-tunnel:shadowJar --no-daemon
-
-      - name: Verify canonical agent fat JAR
-        run: ./gradlew :joltvm-distribution:verifyShadowJar --no-daemon
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

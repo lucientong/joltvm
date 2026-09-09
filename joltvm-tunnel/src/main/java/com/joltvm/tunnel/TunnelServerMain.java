@@ -26,8 +26,11 @@ import java.util.logging.Logger;
  *   java -jar joltvm-tunnel-*-all.jar [options]
  *
  *   Options:
+ *     --bind-address=127.0.0.1
  *     --port=8800           Server port (default: 8800)
  *     --token=SECRET        Registration token (repeatable, if none: allow all)
+ *     --access-token=SECRET HTTP dashboard/proxy token (repeatable)
+ *     --allow-insecure-remote
  *     --tls-cert=cert.pem   TLS certificate path
  *     --tls-key=key.pem     TLS private key path
  * </pre>
@@ -50,13 +53,17 @@ public final class TunnelServerMain {
         LOG.info(BANNER);
 
         int port = TunnelServer.DEFAULT_PORT;
+        String bindAddress = TunnelServer.DEFAULT_BIND_ADDRESS;
         String tlsCert = null;
         String tlsKey = null;
+        boolean allowInsecureRemote = false;
         java.util.List<String> tokens = new java.util.ArrayList<>();
         java.util.List<String> accessTokens = new java.util.ArrayList<>();
 
         for (String arg : args) {
-            if (arg.startsWith("--port=")) {
+            if (arg.startsWith("--bind-address=")) {
+                bindAddress = arg.substring("--bind-address=".length());
+            } else if (arg.startsWith("--port=")) {
                 port = Integer.parseInt(arg.substring("--port=".length()));
             } else if (arg.startsWith("--token=")) {
                 tokens.add(arg.substring("--token=".length()));
@@ -66,6 +73,8 @@ public final class TunnelServerMain {
                 tlsCert = arg.substring("--tls-cert=".length());
             } else if (arg.startsWith("--tls-key=")) {
                 tlsKey = arg.substring("--tls-key=".length());
+            } else if ("--allow-insecure-remote".equals(arg)) {
+                allowInsecureRemote = true;
             } else if ("--help".equals(arg) || "-h".equals(arg)) {
                 printUsage();
                 return;
@@ -76,7 +85,8 @@ public final class TunnelServerMain {
             }
         }
 
-        TunnelServer server = new TunnelServer(port, tlsCert, tlsKey);
+        TunnelServer server = new TunnelServer(
+                bindAddress, port, tlsCert, tlsKey, allowInsecureRemote);
         for (String token : tokens) {
             server.addRegistrationToken(token);
         }
@@ -91,13 +101,13 @@ public final class TunnelServerMain {
 
         LOG.info("Tunnel server is running. Press Ctrl+C to stop.");
         if (tokens.isEmpty()) {
-            LOG.warning("No registration tokens configured — any agent can connect (dev mode).");
+            LOG.warning("No registration tokens configured — any local agent can connect (dev mode).");
         } else {
             LOG.info(tokens.size() + " registration token(s) configured.");
         }
         if (accessTokens.isEmpty()) {
-            LOG.warning("No --access-token configured — HTTP dashboard/proxy APIs are open (dev mode). "
-                    + "Configure --access-token for production.");
+            LOG.warning("No --access-token configured — local HTTP dashboard/proxy APIs are open "
+                    + "(dev mode). Configure --access-token for remote access.");
         } else {
             LOG.info(accessTokens.size() + " HTTP access token(s) configured.");
         }
@@ -113,9 +123,11 @@ public final class TunnelServerMain {
                 Usage: java -jar joltvm-tunnel-*-all.jar [options]
 
                 Options:
+                  --bind-address=ADDRESS   Bind address (default: 127.0.0.1)
                   --port=PORT              Server port (default: 8800)
                   --token=SECRET           Agent registration token (repeatable)
                   --access-token=SECRET    HTTP dashboard/proxy access token (repeatable)
+                  --allow-insecure-remote  Allow remote bind without both tokens (dangerous)
                   --tls-cert=PATH          TLS certificate (PEM)
                   --tls-key=PATH           TLS private key (PEM)
                   --help, -h               Show this help

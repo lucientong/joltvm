@@ -32,7 +32,7 @@ import javax.crypto.spec.PBEKeySpec;
  * Security configuration for JoltVM.
  *
  * <p>Manages authentication settings and user credentials.
- * Passwords are stored as salted SHA-256 hashes — never in plain text.
+ * Passwords are stored with salted PBKDF2-SHA256 — never in plain text.
  * When security is disabled, all requests are allowed without authentication.
  *
  * <p>Password hash format (PBKDF2): {@code $pbkdf2-sha256$iterations$base64(salt)$base64(hash)}

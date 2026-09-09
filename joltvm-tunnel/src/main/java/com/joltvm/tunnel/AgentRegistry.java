@@ -85,7 +85,18 @@ public class AgentRegistry {
      * @param token the pre-shared token
      */
     public void addToken(String token) {
-        validTokens.put(token, Boolean.TRUE);
+        if (token != null && !token.isBlank()) {
+            validTokens.put(token, Boolean.TRUE);
+        }
+    }
+
+    /**
+     * Returns whether at least one agent registration token is configured.
+     *
+     * @return {@code true} when registration requires a token
+     */
+    public boolean isTokenConfigured() {
+        return !validTokens.isEmpty();
     }
 
     /**

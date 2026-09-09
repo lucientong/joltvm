@@ -731,7 +731,11 @@ Netty 管道在安全开启时先经 `WebSocketAuthHandler` 校验 `?token=`，�
 
 参见上方 [joltvm-tunnel](#joltvm-tunnel) 模块。Tunnel 支持在无需开放入站端口的情况下诊断防火墙或 Kubernetes Pod 内的 JVM。
 
-**鉴权分层：** `--token` 用于 Agent 注册；`--access-token` 用于 HTTP 仪表盘/代理（Bearer 或 query）。Agent 侧 TLS 默认使用 JVM 信任库；私有 CA 使用 `tunnelTrustCert`，仅开发环境可设 `tunnelInsecureSkipVerify=true`。
+**鉴权与绑定：** Tunnel 默认绑定 `127.0.0.1`。使用非本地
+`--bind-address` 时必须同时配置 Agent 注册 `--token` 与 HTTP 仪表盘/代理
+`--access-token`；仅可在隔离开发网络中显式使用
+`--allow-insecure-remote` 绕过。Agent 侧 TLS 默认使用 JVM 信任库；私有 CA
+使用 `tunnelTrustCert`，仅开发环境可设 `tunnelInsecureSkipVerify=true`。
 
 ```
 Agent → TunnelClient → 出站 WS → TunnelServer → AgentRegistry
@@ -743,7 +747,7 @@ Agent → WS 响应 → RequestCorrelator.complete() → HTTP 响应 → 用户
 
 ### 发行打包
 
-规范 Agent JAR 由 `joltvm-distribution` 构建（`./gradlew :joltvm-distribution:shadowJar` → `joltvm-agent-*-all.jar`），合并 agent + server 并重定位依赖。CLI `attach` 内嵌该 JAR。CI 执行 `:joltvm-distribution:verifyShadowJar`。
+规范 Agent JAR 由 `joltvm-distribution` 构建（`./gradlew :joltvm-distribution:shadowJar` → `joltvm-agent-*-all.jar`），合并 agent + server 并重定位依赖。CLI `attach` 内嵌该 JAR；Maven Central 以 `io.github.lucientong:joltvm-agent:<version>:all` 发布同一产物。CI 除内容校验外，还真实执行 `-javaagent` 与 CLI attach smoke。
 
 ---
 
@@ -854,7 +858,9 @@ base64url(username:role:expirationEpochSeconds).base64url(HMAC-SHA256-signature)
 
 ### 安全开关
 
-安全功能可通过 `SecurityConfig.setEnabled(false)` 完全禁用。禁用时所有请求无需认证即可访问 — 适用于开发环境。
+安全功能可通过 `SecurityConfig.setEnabled(false)` 禁用，但内嵌服务仍默认只绑定
+`127.0.0.1`。非本地 `bindAddress` 必须设置 `security=true`；
+`allowInsecureRemote=true` 仅作为隔离开发网络的显式逃生开关，生产环境禁止使用。
 
 ---
 
@@ -1065,4 +1071,4 @@ joltvm/
 
 ---
 
-*最后更新：2026-04-21*
+*最后更新：2026-09-10*

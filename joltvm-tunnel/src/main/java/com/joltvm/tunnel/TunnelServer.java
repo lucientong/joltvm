@@ -36,9 +36,10 @@ import io.netty.handler.stream.ChunkedWriteHandler;
 
 import java.io.File;
 import java.io.InputStream;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -67,9 +68,12 @@ public class TunnelServer {
     private static final Logger LOG = Logger.getLogger(TunnelServer.class.getName());
 
     public static final int DEFAULT_PORT = 8800;
+    public static final String DEFAULT_BIND_ADDRESS = "127.0.0.1";
     private static final int MAX_CONTENT_LENGTH = 10 * 1024 * 1024; // 10 MB
 
     private final int port;
+    private final String bindAddress;
+    private final boolean allowInsecureRemote;
     private final AgentRegistry registry;
     private final RequestCorrelator correlator;
     private final AccessTokenStore accessTokens;
@@ -82,14 +86,25 @@ public class TunnelServer {
     private Channel serverChannel;
 
     public TunnelServer(int port) {
-        this(port, null, null);
+        this(DEFAULT_BIND_ADDRESS, port, null, null, false);
     }
 
     public TunnelServer(int port, String tlsCertPath, String tlsKeyPath) {
+        this(DEFAULT_BIND_ADDRESS, port, tlsCertPath, tlsKeyPath, false);
+    }
+
+    public TunnelServer(
+            String bindAddress,
+            int port,
+            String tlsCertPath,
+            String tlsKeyPath,
+            boolean allowInsecureRemote) {
         if (port < 1 || port > 65535) {
             throw new IllegalArgumentException("Port must be between 1 and 65535, got: " + port);
         }
+        this.bindAddress = validateBindAddress(bindAddress);
         this.port = port;
+        this.allowInsecureRemote = allowInsecureRemote;
         this.registry = new AgentRegistry();
         this.correlator = new RequestCorrelator();
         this.accessTokens = new AccessTokenStore();
@@ -130,6 +145,13 @@ public class TunnelServer {
             return;
         }
 
+        try {
+            validateRemoteSecurity();
+        } catch (RuntimeException e) {
+            running.set(false);
+            throw e;
+        }
+
         bossGroup = new NioEventLoopGroup(1);
         workerGroup = new NioEventLoopGroup();
 
@@ -156,10 +178,10 @@ public class TunnelServer {
                         }
                     });
 
-            serverChannel = bootstrap.bind(port).sync().channel();
+            serverChannel = bootstrap.bind(bindAddress, port).sync().channel();
             String scheme = sslContext != null ? "https" : "http";
-            LOG.info(String.format("JoltVM Tunnel Server started on port %d — %s://localhost:%d",
-                    port, scheme, port));
+            LOG.info(String.format("JoltVM Tunnel Server started at %s://%s:%d",
+                    scheme, bindAddress, port));
         } catch (Exception e) {
             running.set(false);
             shutdown();
@@ -189,6 +211,7 @@ public class TunnelServer {
 
     public boolean isRunning() { return running.get(); }
     public int getPort() { return port; }
+    public String getBindAddress() { return bindAddress; }
     public AgentRegistry getRegistry() { return registry; }
     public RequestCorrelator getCorrelator() { return correlator; }
     public String getVersion() { return version; }
@@ -196,6 +219,38 @@ public class TunnelServer {
     private void shutdown() {
         if (bossGroup != null) bossGroup.shutdownGracefully();
         if (workerGroup != null) workerGroup.shutdownGracefully();
+    }
+
+    private void validateRemoteSecurity() {
+        if (allowInsecureRemote || isLoopback(bindAddress)) {
+            return;
+        }
+        if (!registry.isTokenConfigured() || !accessTokens.isConfigured()) {
+            throw new IllegalStateException(
+                    "Refusing non-loopback tunnel bind without both --token and --access-token: "
+                            + bindAddress + ". Configure both tokens (recommended), or explicitly "
+                            + "set --allow-insecure-remote for an isolated development network.");
+        }
+    }
+
+    private static String validateBindAddress(String candidate) {
+        if (candidate == null || candidate.isBlank()) {
+            throw new IllegalArgumentException("bindAddress must not be blank");
+        }
+        try {
+            InetAddress.getByName(candidate);
+        } catch (UnknownHostException e) {
+            throw new IllegalArgumentException("Invalid bindAddress: " + candidate, e);
+        }
+        return candidate;
+    }
+
+    private static boolean isLoopback(String candidate) {
+        try {
+            return InetAddress.getByName(candidate).isLoopbackAddress();
+        } catch (UnknownHostException e) {
+            throw new IllegalArgumentException("Invalid bindAddress: " + candidate, e);
+        }
     }
 
     private static SslContext buildSslContext(String certPath, String keyPath) {

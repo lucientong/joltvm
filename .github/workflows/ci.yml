@@ -45,6 +45,10 @@ jobs:
       - name: Verify canonical agent fat JAR
         run: ./gradlew :joltvm-distribution:verifyShadowJar --no-daemon
 
+      - name: Smoke test javaagent and CLI attach release paths
+        if: matrix.os == 'ubuntu-latest' && matrix.java == '17'
+        run: bash .github/scripts/release-smoke.sh
+
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.java == '17'
         uses: codecov/codecov-action@v5

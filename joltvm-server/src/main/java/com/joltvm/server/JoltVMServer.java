@@ -39,6 +39,8 @@ import com.joltvm.server.websocket.WebSocketAuthHandler;
 import com.joltvm.server.websocket.WebSocketFrameHandler;
 
 import java.io.File;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -74,11 +76,15 @@ public final class JoltVMServer {
     /** Default port for the JoltVM web server. */
     public static final int DEFAULT_PORT = 7758;
 
+    /** Secure-by-default bind address. */
+    public static final String DEFAULT_BIND_ADDRESS = "127.0.0.1";
+
     private static final int BOSS_THREADS = 1;
     private static final int WORKER_THREADS = 2;
     private static final int MAX_CONTENT_LENGTH = 10 * 1024 * 1024; // 10 MB
 
     private final int port;
+    private final String bindAddress;
     private final HttpRouter router;
     private final StaticFileHandler staticFileHandler;
     private final SecurityConfig securityConfig;
@@ -99,14 +105,14 @@ public final class JoltVMServer {
     private Channel serverChannel;
 
     /**
-     * Creates a server on the default port ({@value DEFAULT_PORT}) with security disabled.
+     * Creates a loopback-only server on the default port ({@value DEFAULT_PORT}).
      */
     public JoltVMServer() {
         this(DEFAULT_PORT);
     }
 
     /**
-     * Creates a server on the specified port with security disabled.
+     * Creates a loopback-only server on the specified port.
      *
      * @param port the TCP port to listen on (must be 1–65535)
      * @throws IllegalArgumentException if port is out of range
@@ -121,8 +127,10 @@ public final class JoltVMServer {
      * <p>Supported keys:
      * <table>
      *   <tr><th>Key</th><th>Default</th><th>Description</th></tr>
+     *   <tr><td>{@code bindAddress}</td><td>{@code 127.0.0.1}</td><td>Server bind address</td></tr>
      *   <tr><td>{@code security}</td><td>{@code false}</td><td>Enable authentication ({@code true}/{@code false})</td></tr>
-     *   <tr><td>{@code adminPassword}</td><td>{@code joltvm}</td><td>Initial admin password (stored as salted SHA-256 hash)</td></tr>
+     *   <tr><td>{@code adminPassword}</td><td>{@code joltvm}</td><td>Initial admin password (stored with PBKDF2-SHA256)</td></tr>
+     *   <tr><td>{@code allowInsecureRemote}</td><td>{@code false}</td><td>Allow non-loopback bind without authentication (dangerous)</td></tr>
      * </table>
      *
      * @param port      the TCP port to listen on (must be 1–65535)
@@ -138,6 +146,11 @@ public final class JoltVMServer {
         this.staticFileHandler = new StaticFileHandler();
         boolean secEnabled = "true".equalsIgnoreCase(
                 agentArgs.getOrDefault("security", "false"));
+        boolean allowInsecureRemote = "true".equalsIgnoreCase(
+                agentArgs.getOrDefault("allowInsecureRemote", "false"));
+        this.bindAddress = validateBindAddress(
+                agentArgs.getOrDefault("bindAddress", DEFAULT_BIND_ADDRESS),
+                secEnabled, allowInsecureRemote);
         String adminPwd = agentArgs.getOrDefault("adminPassword",
                 SecurityConfig.DEFAULT_ADMIN_PASSWORD);
         this.securityConfig = new SecurityConfig(secEnabled, adminPwd);
@@ -158,6 +171,7 @@ public final class JoltVMServer {
             throw new IllegalArgumentException("Port must be between 1 and 65535, got: " + port);
         }
         this.port = port;
+        this.bindAddress = DEFAULT_BIND_ADDRESS;
         this.router = new HttpRouter();
         this.staticFileHandler = new StaticFileHandler();
         this.securityConfig = Objects.requireNonNull(securityConfig, "securityConfig");
@@ -208,8 +222,9 @@ public final class JoltVMServer {
                         }
                     });
 
-            serverChannel = bootstrap.bind(port).sync().channel();
-            LOG.info(String.format("JoltVM server started on port %d — http://localhost:%d", port, port));
+            serverChannel = bootstrap.bind(bindAddress, port).sync().channel();
+            LOG.info(String.format("JoltVM server started at %s://%s:%d",
+                    sslContext != null ? "https" : "http", bindAddress, port));
         } catch (Exception e) {
             running.set(false);
             shutdown(bossGroup, workerGroup);
@@ -280,6 +295,15 @@ public final class JoltVMServer {
     }
 
     /**
+     * Returns the address the server is configured to bind.
+     *
+     * @return the configured bind address
+     */
+    public String getBindAddress() {
+        return bindAddress;
+    }
+
+    /**
      * Returns the HTTP router for registering custom handlers.
      *
      * @return the router instance
@@ -341,6 +365,25 @@ public final class JoltVMServer {
             throw new IllegalArgumentException(
                     "Failed to build TLS context from cert=" + certPath + " key=" + keyPath, e);
         }
+    }
+
+    private static String validateBindAddress(
+            String candidate, boolean securityEnabled, boolean allowInsecureRemote) {
+        if (candidate == null || candidate.isBlank()) {
+            throw new IllegalArgumentException("bindAddress must not be blank");
+        }
+        try {
+            InetAddress address = InetAddress.getByName(candidate);
+            if (!address.isLoopbackAddress() && !securityEnabled && !allowInsecureRemote) {
+                throw new IllegalArgumentException(
+                        "Refusing non-loopback bind without authentication: " + candidate
+                                + ". Set security=true (recommended), or explicitly set "
+                                + "allowInsecureRemote=true for an isolated development network.");
+            }
+        } catch (UnknownHostException e) {
+            throw new IllegalArgumentException("Invalid bindAddress: " + candidate, e);
+        }
+        return candidate;
     }
 
     private static void shutdown(EventLoopGroup... groups) {

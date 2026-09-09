@@ -31,6 +31,20 @@ dependencies {
     implementation("com.google.code.gson:gson:${property("gsonVersion")}")
 }
 
+// Keep the thin JAR as the primary Maven artifact for API consumers, and publish
+// the canonical runnable distribution under the conventional "all" classifier.
+// The distribution project is evaluated later, so wire its Shadow task after all
+// project build scripts have been configured.
+gradle.projectsEvaluated {
+    publishing {
+        publications.named<MavenPublication>("mavenJava") {
+            artifact(project(":joltvm-distribution").tasks.named("shadowJar")) {
+                classifier = "all"
+            }
+        }
+    }
+}
+
 tasks.jar {
     manifest {
         attributes(

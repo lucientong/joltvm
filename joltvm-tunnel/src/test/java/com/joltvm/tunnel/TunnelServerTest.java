@@ -18,9 +18,18 @@ package com.joltvm.tunnel;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.net.ServerSocket;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class TunnelServerTest {
+
+    private static int findAvailablePort() throws IOException {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        }
+    }
 
     @Test
     void testInvalidPort() {
@@ -38,6 +47,7 @@ class TunnelServerTest {
         TunnelServer server = new TunnelServer(9999);
         assertFalse(server.isRunning());
         assertEquals(9999, server.getPort());
+        assertEquals("127.0.0.1", server.getBindAddress());
     }
 
     @Test
@@ -61,5 +71,39 @@ class TunnelServerTest {
         server.addRegistrationToken("my-token");
         assertTrue(server.getRegistry().isValidToken("my-token"));
         assertFalse(server.getRegistry().isValidToken("wrong"));
+    }
+
+    @Test
+    void testRemoteBindRequiresBothTokenTypes() {
+        TunnelServer server = new TunnelServer("0.0.0.0", 9999, null, null, false);
+        IllegalStateException error = assertThrows(IllegalStateException.class, server::start);
+        assertTrue(error.getMessage().contains("--token"));
+        assertFalse(server.isRunning());
+    }
+
+    @Test
+    void testRemoteBindWithBothTokenTypesStarts() throws Exception {
+        TunnelServer server = new TunnelServer(
+                "0.0.0.0", findAvailablePort(), null, null, false);
+        server.addRegistrationToken("agent-secret");
+        server.addAccessToken("http-secret");
+        try {
+            server.start();
+            assertTrue(server.isRunning());
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
+    void testExplicitInsecureRemoteOverrideStarts() throws Exception {
+        TunnelServer server = new TunnelServer(
+                "0.0.0.0", findAvailablePort(), null, null, true);
+        try {
+            server.start();
+            assertTrue(server.isRunning());
+        } finally {
+            server.stop();
+        }
     }
 }

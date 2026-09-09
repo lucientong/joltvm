@@ -735,7 +735,12 @@ Netty pipeline includes `WebSocketAuthHandler` (validates `?token=` when securit
 
 See [joltvm-tunnel](#joltvm-tunnel) module above. The tunnel enables diagnosing JVMs behind firewalls or in Kubernetes pods without opening inbound ports.
 
-**Auth layers:** `--token` for agent registration; `--access-token` for HTTP dashboard/proxy (Bearer or query). Agent TLS uses the JVM trust store by default; set `tunnelTrustCert` for private CAs, or `tunnelInsecureSkipVerify=true` only for local development.
+**Auth and binding:** Tunnel binds to `127.0.0.1` by default. A non-loopback
+`--bind-address` requires both `--token` for Agent registration and
+`--access-token` for HTTP dashboard/proxy, unless the operator explicitly passes
+`--allow-insecure-remote`. Agent TLS uses the JVM trust store by default; set
+`tunnelTrustCert` for private CAs, or `tunnelInsecureSkipVerify=true` only for
+local development.
 
 ```
 Agent → TunnelClient → outbound WS → TunnelServer → AgentRegistry
@@ -747,7 +752,7 @@ Agent → WS response → RequestCorrelator.complete() → HTTP response → Use
 
 ### Distribution packaging
 
-The release agent JAR is built by `joltvm-distribution` (`./gradlew :joltvm-distribution:shadowJar` → `joltvm-agent-*-all.jar`). It merges agent + server with relocated dependencies. CLI embeds that JAR for `attach`. CI runs `:joltvm-distribution:verifyShadowJar`.
+The release agent JAR is built by `joltvm-distribution` (`./gradlew :joltvm-distribution:shadowJar` → `joltvm-agent-*-all.jar`). It merges agent + server with relocated dependencies. CLI embeds that JAR for `attach`; Maven Central publishes the same JAR as `io.github.lucientong:joltvm-agent:<version>:all`. CI verifies its contents and runs real `-javaagent` plus CLI attach smoke tests.
 
 ---
 
@@ -860,7 +865,11 @@ base64url(username:role:expirationEpochSeconds).base64url(HMAC-SHA256-signature)
 
 ### Security Toggle
 
-Security can be completely disabled via `SecurityConfig.setEnabled(false)`. When disabled, all requests are allowed without authentication — suitable for development environments.
+Security can be disabled via `SecurityConfig.setEnabled(false)`. The embedded
+server is still safe by default because it binds to `127.0.0.1`. A non-loopback
+`bindAddress` requires `security=true`; `allowInsecureRemote=true` is an explicit
+escape hatch for isolated development networks and must not be used in
+production.
 
 ---
 
@@ -1065,4 +1074,4 @@ joltvm/
 
 ---
 
-*Last updated: 2026-04-21*
+*Last updated: 2026-09-10*

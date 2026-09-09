@@ -7,11 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-10
+
+### Added
+- **Secure bind controls** — Agent Web IDE and Tunnel Server now bind to `127.0.0.1` by default. Use `bindAddress` / `--bind-address` for an explicit remote listener.
+- **Maven runnable Agent** — `io.github.lucientong:joltvm-agent` now publishes the canonical distribution fat JAR with the `all` classifier while retaining the thin primary artifact.
+- **Published-path smoke gate** — CI and Release exercise both `-javaagent` startup and CLI attach using the actual shadow JARs.
+
+### Security
+- Agent non-loopback binds require `security=true` unless `allowInsecureRemote=true` is explicitly set.
+- Tunnel non-loopback binds require both an Agent registration token and an HTTP access token unless `--allow-insecure-remote` is explicitly set.
+
+### Changed
+- Release workflow reruns the full test and coverage suite before Maven Central, GitHub Release, and Docker publication.
+- Updated project version to 1.2.0.
+
 ## [1.1.0] - 2026-09-09
 
 ### Added
 - **Canonical agent distribution** — New `joltvm-distribution` module produces `joltvm-agent-*-all.jar` with agent, server, Web UI, and relocated dependencies. CLI `attach` embeds this distribution JAR.
-- **Tunnel HTTP authentication** — `--access-token` protects dashboard/proxy APIs using `Authorization: Bearer` or `access_token`; `/api/tunnel/health` remains anonymous.
+- **Tunnel HTTP authentication** — `--access-token` protects dashboard/proxy APIs using `Authorization: Bearer` or `accessToken`; `/api/tunnel/health` remains anonymous.
 - **Tunnel trust configuration** — `tunnelTrustCert` supports private CAs; `tunnelInsecureSkipVerify` is an explicit development-only opt-in.
 - **ClassLoader-aware hot-swap** — `classLoaderId` disambiguates duplicate FQCNs, and compatible primary/inner classes can be redefined as one batch.
 
