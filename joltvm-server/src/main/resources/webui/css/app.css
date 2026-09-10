@@ -147,6 +147,23 @@ body {
     left: 0;
 }
 
+.api-docs-link {
+    align-self: center;
+    margin-left: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.api-docs-link:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
 /* --- Status Indicator with pulse --- */
 .status-indicator {
     display: flex;

@@ -18,7 +18,7 @@ JoltVM 是一个 JVM 在线诊断与热修复框架。通过 Java Agent 附着�
 
 ## ✨ 功能特性
 
-> JoltVM 正在积极开发中。Phase 1 至 Phase 17 已完成；v1.3.0 将 OGNL 改为默认拒绝模型，并增加方法追踪最小耗时过滤。完整计划参见[路线图](#-路线图)。
+> JoltVM 正在积极开发中。Phase 1 至 Phase 17 已完成；v1.4.0 增加完整的 OpenAPI 3.1 契约和内置 Swagger UI。完整计划参见[路线图](#-路线图)。
 
 ### 🖥️ 浏览器端 Web IDE
 不再需要记忆 50+ 条命令。可视化界面集成 Monaco Editor 代码编辑器、实时日志流、类和方法树导航。在线编辑代码并直接热修复。
@@ -37,6 +37,9 @@ JoltVM 是一个 JVM 在线诊断与热修复框架。通过 Java Agent 附着�
 
 ### 🔒 安全审计
 基于 HMAC-SHA256 的令牌认证，三级 RBAC 角色控制（Viewer / Operator / Admin）。认证中间件对每个 API 请求进行权限检查。每次热修复生成包含时间戳、操作人、原因和差异的审计条目。不可篡改的审计日志，支持 JSON Lines 和 CSV 格式导出。服务默认仅绑定 `127.0.0.1`；非本地绑定必须启用认证，除非显式使用仅限开发环境的危险开关。
+
+### 📖 可发现的 REST API
+内置 OpenAPI 3.1 契约覆盖全部静态核心路由并标注所需 RBAC 角色。可在 `http://localhost:7758/docs.html` 浏览 Swagger UI，或从 `GET /api/openapi.json` 获取公开的机器可读契约。契约测试会阻止已注册路由与文档静默漂移；插件贡献的动态路由仍在运行时发现。
 
 ### 🌐 远程诊断 (Tunnel)
 无需开放入站端口，即可诊断防火墙或 Kubernetes Pod 内的 JVM。Agent 主动向独立的 Tunnel Server 发起 WebSocket 出站连接。用户通过 Tunnel 的 HTTP API 和内置仪表盘访问远程 Agent。支持预共享 Token 注册和 TLS 加密通信。
@@ -96,6 +99,14 @@ java -javaagent:joltvm-distribution/build/libs/joltvm-agent-*-all.jar=port=7758,
 | `tunnelTrustCert` | *(无)*                            | `wss://` 连接时使用的自定义 CA / 信任证书（PEM）              |
 | `tunnelInsecureSkipVerify` | `false`                  | 显式跳过 Tunnel TLS 证书校验（仅开发用）                     |
 
+### API 文档
+
+- Swagger UI：`http://localhost:7758/docs.html`
+- OpenAPI 3.1 JSON：`http://localhost:7758/api/openapi.json`
+
+OpenAPI 文档保持公开，便于工具发现 API；受保护操作仍要求对应 Viewer、Operator
+或 Admin 角色的 Bearer Token。Swagger UI 仅向同源请求复用当前 Web IDE Token。
+
 ---
 
 ## 🏗️ 架构
@@ -151,7 +162,7 @@ JoltVM 由以下模块组成（详见[架构文档](docs/zh/architecture.md)）�
 <dependency>
     <groupId>io.github.lucientong</groupId>
     <artifactId>joltvm-agent</artifactId>
-    <version>1.3.0</version>
+    <version>1.4.0</version>
 </dependency>
 ```
 
@@ -160,7 +171,7 @@ JoltVM 由以下模块组成（详见[架构文档](docs/zh/architecture.md)）�
 
 ```bash
 mvn dependency:copy \
-  -Dartifact=io.github.lucientong:joltvm-agent:1.3.0:jar:all \
+  -Dartifact=io.github.lucientong:joltvm-agent:1.4.0:jar:all \
   -DoutputDirectory=.
 ```
 

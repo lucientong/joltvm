@@ -50,6 +50,11 @@ java -javaagent:"$AGENT_JAR"=port=17758 \
 P1=$!
 wait_for_url "http://127.0.0.1:17758/api/health" "$WORK_DIR/javaagent-health.json"
 grep -q "\"version\":\"$VERSION\"" "$WORK_DIR/javaagent-health.json"
+wait_for_url "http://127.0.0.1:17758/api/openapi.json" "$WORK_DIR/openapi.json"
+grep -q "\"version\": \"$VERSION\"" "$WORK_DIR/openapi.json"
+grep -q "\"/api/health\"" "$WORK_DIR/openapi.json"
+wait_for_url "http://127.0.0.1:17758/docs.html" "$WORK_DIR/swagger-ui.html"
+grep -q "SwaggerUIBundle" "$WORK_DIR/swagger-ui.html"
 kill "$P1"
 wait "$P1" || true
 P1=""

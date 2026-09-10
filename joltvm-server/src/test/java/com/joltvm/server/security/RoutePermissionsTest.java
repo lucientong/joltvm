@@ -45,6 +45,12 @@ class RoutePermissionsTest {
         }
 
         @Test
+        @DisplayName("OpenAPI contract requires no auth")
+        void openApiNoAuth() {
+            assertNull(RoutePermissions.getRequiredRole("GET", "/api/openapi.json"));
+        }
+
+        @Test
         @DisplayName("static files require no auth")
         void staticFilesNoAuth() {
             assertNull(RoutePermissions.getRequiredRole("GET", "/"));
@@ -141,8 +147,19 @@ class RoutePermissionsTest {
     }
 
     @Test
-    @DisplayName("unknown API endpoint defaults to VIEWER")
-    void unknownEndpoint() {
+    @DisplayName("unknown read API endpoint defaults to VIEWER")
+    void unknownReadEndpoint() {
         assertEquals(Role.VIEWER, RoutePermissions.getRequiredRole("GET", "/api/unknown"));
+    }
+
+    @Test
+    @DisplayName("unknown mutating API endpoint defaults to OPERATOR")
+    void unknownWriteEndpoint() {
+        assertEquals(Role.OPERATOR,
+                RoutePermissions.getRequiredRole("POST", "/api/plugins/example/action"));
+        assertEquals(Role.OPERATOR,
+                RoutePermissions.getRequiredRole("PUT", "/api/plugins/example/config"));
+        assertEquals(Role.OPERATOR,
+                RoutePermissions.getRequiredRole("DELETE", "/api/plugins/example/item"));
     }
 }

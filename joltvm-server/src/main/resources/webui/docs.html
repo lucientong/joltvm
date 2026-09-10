@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JoltVM API Documentation</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css">
+    <style>
+        html { box-sizing: border-box; overflow-y: scroll; }
+        *, *::before, *::after { box-sizing: inherit; }
+        body { margin: 0; background: #fafafa; }
+        .joltvm-docs-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 24px;
+            color: #f8fafc;
+            background: #111827;
+            font: 14px system-ui, sans-serif;
+        }
+        .joltvm-docs-bar strong { font-size: 17px; }
+        .joltvm-docs-bar a { color: #93c5fd; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="joltvm-docs-bar">
+        <strong>⚡ JoltVM REST API</strong>
+        <a href="/">Back to Web IDE</a>
+    </div>
+    <div id="swagger-load-error" style="display:none;padding:32px;font:15px system-ui,sans-serif">
+        Swagger UI assets could not be loaded. The
+        <a href="/api/openapi.json">raw OpenAPI 3.1 document</a> remains available.
+    </div>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js" crossorigin="anonymous"></script>
+    <script>
+        window.addEventListener('load', () => {
+            if (typeof SwaggerUIBundle === 'undefined') {
+                document.getElementById('swagger-load-error').style.display = 'block';
+                return;
+            }
+            SwaggerUIBundle({
+                url: '/api/openapi.json',
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                displayRequestDuration: true,
+                persistAuthorization: false,
+                validatorUrl: null,
+                requestInterceptor: request => {
+                    const target = new URL(request.url, window.location.href);
+                    const token = localStorage.getItem('joltvm_token');
+                    if (target.origin === window.location.origin &&
+                            token && token !== 'disabled') {
+                        request.headers = request.headers || {};
+                        if (!request.headers.Authorization && !request.headers.authorization) {
+                            request.headers.Authorization = 'Bearer ' + token;
+                        }
+                    }
+                    return request;
+                },
+                presets: [SwaggerUIBundle.presets.apis],
+                layout: 'BaseLayout'
+            });
+        });
+    </script>
+</body>
+</html>

@@ -24,11 +24,14 @@ import java.util.Map;
  * <p>Used by the authentication middleware in {@code HttpDispatcherHandler}
  * to enforce role-based access control on each request.
  *
- * <p>Endpoints not listed here default to {@link Role#VIEWER}.
+ * <p>Endpoints not listed here default to {@link Role#VIEWER} for read methods
+ * and {@link Role#OPERATOR} for mutating methods. This protects plugin-contributed
+ * write routes even when they do not have an explicit permission entry.
  *
  * <h3>Permission Matrix</h3>
  * <table>
  *   <tr><th>Endpoint</th><th>Method</th><th>Required Role</th></tr>
+ *   <tr><td>/api/openapi.json</td><td>GET</td><td>Public</td></tr>
  *   <tr><td>/api/health</td><td>GET</td><td>VIEWER</td></tr>
  *   <tr><td>/api/classes</td><td>GET</td><td>VIEWER</td></tr>
  *   <tr><td>/api/trace/records</td><td>GET</td><td>VIEWER</td></tr>
@@ -58,10 +61,7 @@ public final class RoutePermissions {
             // Map.entry("/api/auth/login", null),
 
             // Admin-only endpoints
-            Map.entry("POST:/api/audit/export", Role.ADMIN),
             Map.entry("GET:/api/audit/export", Role.ADMIN),
-            Map.entry("POST:/api/auth/users", Role.ADMIN),
-            Map.entry("DELETE:/api/auth/users", Role.ADMIN),
 
             // Operator endpoints (hot-fix + trace operations)
             Map.entry("POST:/api/compile", Role.OPERATOR),
@@ -128,7 +128,8 @@ public final class RoutePermissions {
      *   <li>Exact match: {@code METHOD:/exact/path}</li>
      *   <li>Login/auth endpoints: no auth required (returns {@code null})</li>
      *   <li>Static files (no /api/ prefix): no auth required (returns {@code null})</li>
-     *   <li>Default: {@link Role#VIEWER}</li>
+     *   <li>Default read methods: {@link Role#VIEWER}</li>
+     *   <li>Default mutating methods: {@link Role#OPERATOR}</li>
      * </ol>
      *
      * @param method the HTTP method (GET, POST, etc.)
@@ -137,7 +138,8 @@ public final class RoutePermissions {
      */
     public static Role getRequiredRole(String method, String path) {
         // Login endpoints — no auth required
-        if (path.equals("/api/auth/login") || path.equals("/api/auth/status")) {
+        if (path.equals("/api/auth/login") || path.equals("/api/auth/status")
+                || path.equals("/api/openapi.json")) {
             return null;
         }
 
@@ -164,7 +166,10 @@ public final class RoutePermissions {
             }
         }
 
-        // Default: any API endpoint requires at least VIEWER
-        return Role.VIEWER;
+        // Secure default for dynamic plugin routes and future endpoints:
+        // reads require VIEWER; writes require OPERATOR unless explicitly stricter.
+        return "GET".equals(method) || "HEAD".equals(method)
+                ? Role.VIEWER
+                : Role.OPERATOR;
     }
 }

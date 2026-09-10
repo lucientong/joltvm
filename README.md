@@ -18,7 +18,7 @@ JoltVM is a JVM online diagnostics and hot-fix framework. Attach via Java Agent,
 
 ## ✨ Features
 
-> JoltVM is under active development. Phase 1 through Phase 17 are complete; v1.3.0 makes OGNL default-deny and adds minimum-duration trace filtering. See the [Roadmap](#-roadmap) for the full plan.
+> JoltVM is under active development. Phase 1 through Phase 17 are complete; v1.4.0 adds a complete OpenAPI contract and built-in Swagger UI. See the [Roadmap](#-roadmap) for the full plan.
 
 ### 🖥️ Browser-Based Web IDE
 No more memorizing 50+ CLI commands. Point-and-click interface with Monaco Editor, interactive flame graphs (d3-flame-graph), class/method tree navigation, Spring Boot bean browser, and audit dashboard. Edit code and apply hot-fixes visually — all served from the embedded Netty server at `http://localhost:7758`.
@@ -43,6 +43,9 @@ Evaluate read-only OGNL expressions against explicit diagnostic context values. 
 
 ### 🔒 Security & Audit
 HMAC-SHA256 token-based authentication with three-tier RBAC (Viewer / Operator / Admin). Authentication middleware enforces permissions on every API request. Every hot-fix generates an audit entry with timestamp, operator, reason, and diff. Immutable audit logs with JSON Lines and CSV export. Passwords secured with PBKDF2-SHA256 (310,000 iterations). The server binds to `127.0.0.1` by default; remote binds require authentication unless an explicit development-only override is supplied.
+
+### 📖 Discoverable REST API
+The bundled OpenAPI 3.1 contract covers every static core route and records its required RBAC role. Browse the built-in Swagger UI at `http://localhost:7758/docs.html` or fetch the public machine-readable contract from `GET /api/openapi.json`. A contract test prevents registered routes and documentation from drifting apart; plugin-contributed routes remain runtime-discovered.
 
 ### 🌐 Remote Diagnostics (Tunnel)
 Diagnose JVMs behind firewalls without opening inbound ports. The agent initiates an outbound WebSocket connection to a standalone tunnel server. Users access remote agents through the tunnel's HTTP API and built-in dashboard. Pre-shared tokens for agent registration. TLS supported for encrypted communication.
@@ -105,6 +108,15 @@ java -javaagent:joltvm-distribution/build/libs/joltvm-agent-*-all.jar=port=7758,
 | `tunnelTrustCert` | *(none)*                          | PEM CA / trust store for `wss://` tunnel connections |
 | `tunnelInsecureSkipVerify` | `false`                  | Opt-in skip of tunnel TLS verification (dev only) |
 
+### API Documentation
+
+- Swagger UI: `http://localhost:7758/docs.html`
+- OpenAPI 3.1 JSON: `http://localhost:7758/api/openapi.json`
+
+The OpenAPI document is public so tooling can discover the API. Protected operations
+still require a bearer token with the documented Viewer, Operator, or Admin role.
+Swagger UI reuses the current Web IDE token only for same-origin requests.
+
 ---
 
 ## 🏗️ Architecture
@@ -161,7 +173,7 @@ The primary artifact is the thin Agent API library (do not pass this JAR to
 <dependency>
     <groupId>io.github.lucientong</groupId>
     <artifactId>joltvm-agent</artifactId>
-    <version>1.3.0</version>
+    <version>1.4.0</version>
 </dependency>
 ```
 
@@ -170,7 +182,7 @@ it without adding the fat JAR to your application classpath:
 
 ```bash
 mvn dependency:copy \
-  -Dartifact=io.github.lucientong:joltvm-agent:1.3.0:jar:all \
+  -Dartifact=io.github.lucientong:joltvm-agent:1.4.0:jar:all \
   -DoutputDirectory=.
 ```
 

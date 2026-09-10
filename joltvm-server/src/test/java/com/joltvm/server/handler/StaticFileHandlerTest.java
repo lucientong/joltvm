@@ -163,6 +163,18 @@ class StaticFileHandlerTest {
         }
 
         @Test
+        @DisplayName("serves Swagger UI page")
+        void servesApiDocs() {
+            FullHttpResponse response = handler.handle(
+                    dummyRequest, Map.of("filePath", "docs.html"));
+            assertEquals(HttpResponseStatus.OK, response.status());
+            String content = response.content().toString(StandardCharsets.UTF_8);
+            assertTrue(content.contains("SwaggerUIBundle"));
+            assertTrue(content.contains("/api/openapi.json"));
+            response.release();
+        }
+
+        @Test
         @DisplayName("returns 404 for non-existent file")
         void notFound() {
             FullHttpResponse response = handler.handle(dummyRequest, Map.of("filePath", "nonexistent.txt"));

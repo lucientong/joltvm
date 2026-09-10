@@ -37,7 +37,6 @@ import java.util.Map;
  * <p>Query parameters:
  * <ul>
  *   <li>{@code format} — export format: "json" (default) or "csv"</li>
- *   <li>{@code limit} — maximum entries (default: all)</li>
  * </ul>
  *
  * <p>Requires ADMIN role.

@@ -42,6 +42,7 @@ import com.joltvm.server.handler.LoginHandler;
 import com.joltvm.server.handler.LoggerListHandler;
 import com.joltvm.server.handler.LoggerUpdateHandler;
 import com.joltvm.server.handler.OgnlEvalHandler;
+import com.joltvm.server.handler.OpenApiHandler;
 import com.joltvm.server.handler.PluginListHandler;
 import com.joltvm.server.handler.RequestMappingHandler;
 import com.joltvm.server.handler.RollbackHandler;
@@ -100,7 +101,7 @@ public final class APIRoutes {
     private static final Logger LOG = Logger.getLogger(APIRoutes.class.getName());
 
     /** Total number of registered API endpoints. */
-    static final int ROUTE_COUNT = 46;
+    static final int ROUTE_COUNT = 47;
 
     /**
      * Immutable holder for shared service instances, ensuring atomic publication
@@ -262,6 +263,7 @@ public final class APIRoutes {
                 traceService, auditLogService, watchService, ognlService, pluginManager);
 
         router.addRoute(HttpMethod.GET, "/api/health", new HealthHandler());
+        router.addRoute(HttpMethod.GET, "/api/openapi.json", new OpenApiHandler());
 
         router.addRoute(HttpMethod.GET, "/api/classes", new ClassListHandler());
         router.addRoute(HttpMethod.GET, "/api/classes/{className}", new ClassDetailHandler());

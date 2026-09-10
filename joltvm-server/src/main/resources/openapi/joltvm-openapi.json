@@ -1,0 +1,1042 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "JoltVM REST API",
+    "version": "1.4.0",
+    "description": "Runtime JVM diagnostics and hot-fix API. Static core routes are documented here; plugin-contributed routes under /api/plugins/{pluginId}/ are discovered at runtime and are not part of this document. Dynamic plugin reads require VIEWER and mutations require OPERATOR by default."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Current JoltVM agent"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    { "name": "System" },
+    { "name": "Classes" },
+    { "name": "Hot-Swap" },
+    { "name": "Trace" },
+    { "name": "Spring" },
+    { "name": "Threads" },
+    { "name": "JVM" },
+    { "name": "ClassLoaders" },
+    { "name": "Loggers" },
+    { "name": "Expression" },
+    { "name": "Watch" },
+    { "name": "Profiler" },
+    { "name": "Security" },
+    { "name": "Plugins" }
+  ],
+  "paths": {
+    "/api/openapi.json": {
+      "get": {
+        "tags": ["System"],
+        "operationId": "getOpenApiDocument",
+        "summary": "Get the OpenAPI 3.1 contract",
+        "security": [],
+        "x-required-role": "PUBLIC",
+        "responses": {
+          "200": {
+            "description": "OpenAPI document",
+            "content": {
+              "application/vnd.oai.openapi+json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": ["System"],
+        "operationId": "getHealth",
+        "summary": "Get agent and target JVM health",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/classes": {
+      "get": {
+        "tags": ["Classes"],
+        "operationId": "listClasses",
+        "summary": "List loaded classes",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          { "$ref": "#/components/parameters/PageOneBased" },
+          { "$ref": "#/components/parameters/PageSize" },
+          { "$ref": "#/components/parameters/PackageFilter" },
+          { "$ref": "#/components/parameters/Search" }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/classes/{className}": {
+      "get": {
+        "tags": ["Classes"],
+        "operationId": "getClassDetail",
+        "summary": "Get loaded class metadata",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          { "$ref": "#/components/parameters/ClassName" },
+          { "$ref": "#/components/parameters/ClassLoaderIdQuery" }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/classes/{className}/source": {
+      "get": {
+        "tags": ["Classes"],
+        "operationId": "decompileClass",
+        "summary": "Decompile a loaded class",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          { "$ref": "#/components/parameters/ClassName" },
+          { "$ref": "#/components/parameters/ClassLoaderIdQuery" }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/compile": {
+      "post": {
+        "tags": ["Hot-Swap"],
+        "operationId": "compileSource",
+        "summary": "Compile replacement Java source",
+        "x-required-role": "OPERATOR",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CompileRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/api/hotswap": {
+      "post": {
+        "tags": ["Hot-Swap"],
+        "operationId": "hotSwapClass",
+        "summary": "Compile and redefine a loaded class",
+        "x-required-role": "OPERATOR",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/HotSwapRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/api/rollback": {
+      "post": {
+        "tags": ["Hot-Swap"],
+        "operationId": "rollbackClass",
+        "summary": "Restore the most recent class backup",
+        "x-required-role": "OPERATOR",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RollbackRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/api/hotswap/history": {
+      "get": {
+        "tags": ["Hot-Swap"],
+        "operationId": "getHotSwapHistory",
+        "summary": "List hot-swap and rollback history",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          { "$ref": "#/components/parameters/Limit" }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/trace/start": {
+      "post": {
+        "tags": ["Trace"],
+        "operationId": "startTrace",
+        "summary": "Start method tracing or JDK stack sampling",
+        "x-required-role": "OPERATOR",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TraceStartRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "400": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/trace/stop": {
+      "post": {
+        "tags": ["Trace"],
+        "operationId": "stopTrace",
+        "summary": "Stop method tracing, stack sampling, or both",
+        "x-required-role": "OPERATOR",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TraceStopRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/trace/records": {
+      "get": {
+        "tags": ["Trace"],
+        "operationId": "getTraceRecords",
+        "summary": "List captured method trace records",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          { "$ref": "#/components/parameters/Limit" }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/trace/flamegraph": {
+      "get": {
+        "tags": ["Trace"],
+        "operationId": "getTraceFlameGraph",
+        "summary": "Get trace or sample flame graph data",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          {
+            "name": "view",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["auto", "cpu", "wall"] }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/trace/status": {
+      "get": {
+        "tags": ["Trace"],
+        "operationId": "getTraceStatus",
+        "summary": "Get current tracing and sampling state",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/spring/beans": {
+      "get": {
+        "tags": ["Spring"],
+        "operationId": "listSpringBeans",
+        "summary": "List Spring beans",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          { "$ref": "#/components/parameters/PageOneBased" },
+          { "$ref": "#/components/parameters/PageSize" },
+          { "$ref": "#/components/parameters/PackageFilter" },
+          { "$ref": "#/components/parameters/Search" },
+          {
+            "name": "stereotype",
+            "in": "query",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/spring/beans/{beanName}": {
+      "get": {
+        "tags": ["Spring"],
+        "operationId": "getSpringBean",
+        "summary": "Get Spring bean details",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          { "$ref": "#/components/parameters/BeanName" }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/spring/mappings": {
+      "get": {
+        "tags": ["Spring"],
+        "operationId": "listSpringMappings",
+        "summary": "List Spring request mappings",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          { "$ref": "#/components/parameters/Search" },
+          {
+            "name": "method",
+            "in": "query",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/spring/dependencies": {
+      "get": {
+        "tags": ["Spring"],
+        "operationId": "getSpringDependencyGraph",
+        "summary": "Get the Spring bean dependency graph",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/spring/dependencies/{beanName}": {
+      "get": {
+        "tags": ["Spring"],
+        "operationId": "getSpringDependencyChain",
+        "summary": "Get dependencies for one Spring bean",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          { "$ref": "#/components/parameters/BeanName" }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/threads": {
+      "get": {
+        "tags": ["Threads"],
+        "operationId": "listThreads",
+        "summary": "List JVM threads",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/threads/top": {
+      "get": {
+        "tags": ["Threads"],
+        "operationId": "getTopThreads",
+        "summary": "Rank threads by CPU delta",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          {
+            "name": "n",
+            "in": "query",
+            "schema": { "type": "integer", "default": 10 }
+          },
+          {
+            "name": "interval",
+            "in": "query",
+            "schema": { "type": "integer", "default": 200, "description": "Sampling interval in milliseconds" }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/threads/deadlocks": {
+      "get": {
+        "tags": ["Threads"],
+        "operationId": "detectDeadlocks",
+        "summary": "Detect JVM deadlocks",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/threads/dump": {
+      "get": {
+        "tags": ["Threads"],
+        "operationId": "getThreadDump",
+        "summary": "Export a jstack-style thread dump",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": {
+            "description": "Thread dump",
+            "content": {
+              "text/plain": {
+                "schema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/threads/{id}": {
+      "get": {
+        "tags": ["Threads"],
+        "operationId": "getThreadDetail",
+        "summary": "Get one JVM thread and its stack",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          { "$ref": "#/components/parameters/ThreadId" }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/jvm/gc": {
+      "get": {
+        "tags": ["JVM"],
+        "operationId": "getGcStats",
+        "summary": "Get garbage collector statistics",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/jvm/sysprops": {
+      "get": {
+        "tags": ["JVM"],
+        "operationId": "getSystemProperties",
+        "summary": "Get redacted JVM system properties",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/jvm/sysenv": {
+      "get": {
+        "tags": ["JVM"],
+        "operationId": "getEnvironment",
+        "summary": "Get redacted process environment variables",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/jvm/classpath": {
+      "get": {
+        "tags": ["JVM"],
+        "operationId": "getClasspath",
+        "summary": "Get runtime classpath entries",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/classloaders": {
+      "get": {
+        "tags": ["ClassLoaders"],
+        "operationId": "getClassLoaderTree",
+        "summary": "Get the ClassLoader hierarchy",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/classloaders/conflicts": {
+      "get": {
+        "tags": ["ClassLoaders"],
+        "operationId": "getClassLoaderConflicts",
+        "summary": "Find classes loaded by multiple ClassLoaders",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/classloaders/{id}/classes": {
+      "get": {
+        "tags": ["ClassLoaders"],
+        "operationId": "listClassLoaderClasses",
+        "summary": "List classes owned by one ClassLoader",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          { "$ref": "#/components/parameters/ClassLoaderIdPath" },
+          { "$ref": "#/components/parameters/PageZeroBased" },
+          { "$ref": "#/components/parameters/PageSize" },
+          { "$ref": "#/components/parameters/Search" }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/loggers": {
+      "get": {
+        "tags": ["Loggers"],
+        "operationId": "listLoggers",
+        "summary": "List runtime logger configurations",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/loggers/{name}": {
+      "put": {
+        "tags": ["Loggers"],
+        "operationId": "updateLogger",
+        "summary": "Change a logger level",
+        "x-required-role": "OPERATOR",
+        "parameters": [
+          { "$ref": "#/components/parameters/LoggerName" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoggerLevelRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "400": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/ognl/eval": {
+      "post": {
+        "tags": ["Expression"],
+        "operationId": "evaluateOgnl",
+        "summary": "Evaluate a default-deny read-only OGNL expression",
+        "x-required-role": "OPERATOR",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/OgnlRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "400": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/watch/start": {
+      "post": {
+        "tags": ["Watch"],
+        "operationId": "startWatch",
+        "summary": "Start conditional method observation",
+        "x-required-role": "OPERATOR",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/WatchStartRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "400": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/watch": {
+      "get": {
+        "tags": ["Watch"],
+        "operationId": "listWatches",
+        "summary": "List active watch sessions",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/watch/{id}/stop": {
+      "post": {
+        "tags": ["Watch"],
+        "operationId": "stopWatch",
+        "summary": "Stop a watch session",
+        "x-required-role": "OPERATOR",
+        "parameters": [
+          { "$ref": "#/components/parameters/WatchId" }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/watch/{id}/records": {
+      "get": {
+        "tags": ["Watch"],
+        "operationId": "getWatchRecords",
+        "summary": "Get records captured by a watch session",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          { "$ref": "#/components/parameters/WatchId" },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": { "type": "integer", "format": "int64", "default": 0 }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/watch/{id}": {
+      "delete": {
+        "tags": ["Watch"],
+        "operationId": "deleteWatch",
+        "summary": "Delete a watch session",
+        "x-required-role": "OPERATOR",
+        "parameters": [
+          { "$ref": "#/components/parameters/WatchId" }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/profiler/async/status": {
+      "get": {
+        "tags": ["Profiler"],
+        "operationId": "getAsyncProfilerStatus",
+        "summary": "Get async-profiler availability and state",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/profiler/async/start": {
+      "post": {
+        "tags": ["Profiler"],
+        "operationId": "startAsyncProfiler",
+        "summary": "Start an async-profiler session",
+        "x-required-role": "OPERATOR",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ProfilerStartRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "400": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/profiler/async/stop": {
+      "post": {
+        "tags": ["Profiler"],
+        "operationId": "stopAsyncProfiler",
+        "summary": "Stop the active async-profiler session",
+        "x-required-role": "OPERATOR",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "400": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/profiler/async/flamegraph/{id}": {
+      "get": {
+        "tags": ["Profiler"],
+        "operationId": "getAsyncProfilerFlameGraph",
+        "summary": "Download a generated async-profiler flame graph",
+        "x-required-role": "VIEWER",
+        "parameters": [
+          { "$ref": "#/components/parameters/ProfileId" }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": ["Security"],
+        "operationId": "login",
+        "summary": "Authenticate and issue a signed token",
+        "security": [],
+        "x-required-role": "PUBLIC",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/auth/status": {
+      "get": {
+        "tags": ["Security"],
+        "operationId": "getAuthStatus",
+        "summary": "Get authentication configuration",
+        "security": [],
+        "x-required-role": "PUBLIC",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    },
+    "/api/audit/export": {
+      "get": {
+        "tags": ["Security"],
+        "operationId": "exportAuditLog",
+        "summary": "Export immutable audit records",
+        "x-required-role": "ADMIN",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["json", "csv"], "default": "json" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON Lines or CSV audit export",
+            "content": {
+              "application/x-ndjson": { "schema": { "type": "string" } },
+              "text/csv": { "schema": { "type": "string" } }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/api/plugins": {
+      "get": {
+        "tags": ["Plugins"],
+        "operationId": "listPlugins",
+        "summary": "List discovered plugins and contributed routes",
+        "description": "Plugin routes are dynamic and therefore excluded from the static OpenAPI contract. Unknown GET/HEAD routes default to VIEWER; mutating routes default to OPERATOR.",
+        "x-required-role": "VIEWER",
+        "responses": {
+          "200": { "$ref": "#/components/responses/JsonSuccess" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JoltVM token",
+        "description": "Token returned by POST /api/auth/login. Authentication may be disabled for loopback-only development."
+      }
+    },
+    "parameters": {
+      "ClassName": {
+        "name": "className",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" }
+      },
+      "BeanName": {
+        "name": "beanName",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" }
+      },
+      "ThreadId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "integer", "format": "int64" }
+      },
+      "ClassLoaderIdPath": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" }
+      },
+      "LoggerName": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" }
+      },
+      "WatchId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" }
+      },
+      "ProfileId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" }
+      },
+      "ClassLoaderIdQuery": {
+        "name": "classLoaderId",
+        "in": "query",
+        "schema": { "type": "string" }
+      },
+      "PageOneBased": {
+        "name": "page",
+        "in": "query",
+        "schema": { "type": "integer", "minimum": 1, "default": 1 }
+      },
+      "PageZeroBased": {
+        "name": "page",
+        "in": "query",
+        "schema": { "type": "integer", "minimum": 0, "default": 0 }
+      },
+      "PageSize": {
+        "name": "size",
+        "in": "query",
+        "schema": { "type": "integer", "minimum": 1, "default": 100 }
+      },
+      "PackageFilter": {
+        "name": "package",
+        "in": "query",
+        "schema": { "type": "string" }
+      },
+      "Search": {
+        "name": "search",
+        "in": "query",
+        "schema": { "type": "string" }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "schema": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "schemas": {
+      "CompileRequest": {
+        "type": "object",
+        "required": ["className", "sourceCode"],
+        "properties": {
+          "className": { "type": "string" },
+          "sourceCode": { "type": "string" }
+        }
+      },
+      "HotSwapRequest": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CompileRequest" },
+          {
+            "type": "object",
+            "properties": {
+              "classLoaderId": { "type": ["string", "null"] },
+              "reason": { "type": ["string", "null"] }
+            }
+          }
+        ]
+      },
+      "RollbackRequest": {
+        "type": "object",
+        "required": ["className"],
+        "properties": {
+          "className": { "type": "string" },
+          "classLoaderId": { "type": ["string", "null"] },
+          "reason": { "type": ["string", "null"] }
+        }
+      },
+      "TraceStartRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["type", "className"],
+            "properties": {
+              "type": { "const": "trace" },
+              "className": { "type": "string" },
+              "methodName": { "type": ["string", "null"], "default": "*" },
+              "duration": { "type": "integer", "minimum": 1, "maximum": 300, "default": 30 },
+              "minDurationMs": { "type": "integer", "minimum": 0, "maximum": 60000, "default": 0 }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": { "const": "sample" },
+              "interval": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 10 },
+              "duration": { "type": "integer", "minimum": 1, "maximum": 300, "default": 30 },
+              "includeDaemon": { "type": "boolean", "default": true }
+            }
+          }
+        ]
+      },
+      "TraceStopRequest": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "enum": ["trace", "sample", "all"], "default": "all" }
+        }
+      },
+      "LoggerLevelRequest": {
+        "type": "object",
+        "required": ["level"],
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": ["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "OFF", "INHERIT"]
+          }
+        }
+      },
+      "OgnlRequest": {
+        "type": "object",
+        "required": ["expression"],
+        "properties": {
+          "expression": { "type": "string", "maxLength": 4096 },
+          "resultDepth": { "type": "integer", "minimum": 1, "maximum": 10, "default": 5 }
+        }
+      },
+      "WatchStartRequest": {
+        "type": "object",
+        "required": ["classPattern"],
+        "properties": {
+          "classPattern": { "type": "string" },
+          "methodPattern": { "type": "string", "default": "*" },
+          "conditionExpr": {
+            "type": ["string", "null"],
+            "description": "Default-deny OGNL over #args, #returnObj, #throwExp, #cost, #target, and #clazz safe snapshots."
+          },
+          "maxRecords": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 1000 },
+          "durationMs": { "type": "integer", "format": "int64", "minimum": 1, "maximum": 300000, "default": 60000 }
+        }
+      },
+      "ProfilerStartRequest": {
+        "type": "object",
+        "properties": {
+          "event": { "type": "string", "enum": ["cpu", "alloc", "lock", "wall"], "default": "cpu" },
+          "duration": { "type": "integer", "minimum": 1, "maximum": 300, "default": 30 },
+          "interval": { "type": "integer", "format": "int64", "minimum": 0, "default": 0 }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string" },
+          "password": { "type": "string", "format": "password", "writeOnly": true }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error", "message", "status"],
+        "properties": {
+          "error": { "type": "string" },
+          "message": { "type": "string" },
+          "status": { "type": "integer" }
+        }
+      }
+    },
+    "responses": {
+      "JsonSuccess": {
+        "description": "Successful JSON response",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "Error": {
+        "description": "Request failed",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing, invalid, or expired token",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Token role does not permit the operation",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      }
+    }
+  }
+}

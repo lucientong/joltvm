@@ -156,7 +156,8 @@ Can-Set-Native-Method-Prefix: true
 | `HttpDispatcherHandler` | Netty `SimpleChannelInboundHandler`，将请求通过 `HttpRouter` 分发到 `RouteHandler`。处理 CORS 预检（OPTIONS）、静态文件回退和异常。 |
 | `StaticFileHandler` | 从 classpath `webui/` 目录提供嵌入式 Web UI 静态文件。解析 18+ 种文件扩展名的 MIME 类型，防止路径遍历攻击，设置缓存控制头。 |
 | `HttpResponseHelper` | 构建 JSON、文本和错误响应的工具类，自动添加 Content-Type 和 CORS 头。 |
-| `APIRoutes` | 在初始化时将所有 API 端点注册到路由器。管理 46+ 个路由，包括安全审计、线程诊断、JVM 信息、ClassLoader、Logger、OGNL、Watch、Profiler、WebSocket 和插件端点。 |
+| `APIRoutes` | 在初始化时将所有 API 端点注册到路由器。管理 47 个静态路由，包括 OpenAPI、安全审计、线程诊断、JVM 信息、ClassLoader、Logger、OGNL、Watch、Profiler 和插件端点。 |
+| `OpenApiHandler` | `GET /api/openapi.json` — 免认证提供内置 OpenAPI 3.1 契约，供发现工具和 Swagger UI 加载。 |
 | `HealthHandler` | `GET /api/health` — 返回 JVM 状态、PID、运行时间和内存信息。 |
 | `ClassListHandler` | `GET /api/classes` — 分页列出已加载的类，支持包名和搜索过滤。 |
 | `ClassDetailHandler` | `GET /api/classes/{className}` — 类详情（字段、方法、修饰符）。 |
@@ -180,7 +181,7 @@ Can-Set-Native-Method-Prefix: true
 | `Role` | RBAC 角色枚举，三级层次：Viewer (1) < Operator (2) < Admin (3)。提供 `hasPermission()` 实现向上兼容的权限检查。 |
 | `SecurityConfig` | 认证配置与用户管理。基于 `ConcurrentHashMap` 的凭证存储，默认管理员账号（`admin/joltvm`），支持运行时启用/禁用切换。 |
 | `TokenService` | HMAC-SHA256 令牌生成与验证。`SecureRandom` 32 字节密钥，Base64 载荷，默认 24h 过期，内存活跃令牌追踪，常量时间签名比较防止计时攻击。 |
-| `RoutePermissions` | API 端点 → 最低 `Role` 映射。19 条权限规则，支持精确匹配、前缀匹配和免鉴权端点。 |
+| `RoutePermissions` | API 端点 → 最低 `Role` 映射，支持精确/前缀匹配、公开例外和动态路由的安全方法默认值。 |
 | `AuditLogService` | 审计日志服务，内存 `CopyOnWriteArrayList`（最多 1000 条）+ 可选 JSON Lines 文件持久化。记录热替换操作和安全事件，支持 JSON Lines 和 CSV 导出。 |
 | `LoginHandler` | `POST /api/auth/login` — 验证用户名/密码，返回含角色信息的 HMAC 令牌。 |
 | `AuthStatusHandler` | `GET /api/auth/status` — 返回当前认证状态及已认证用户信息。 |
@@ -190,6 +191,7 @@ Can-Set-Native-Method-Prefix: true
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
+| GET | `/api/openapi.json` | 覆盖全部静态核心路由的公开 OpenAPI 3.1 契约 |
 | GET | `/api/health` | 健康检查，包含 JVM 信息 |
 | GET | `/api/classes` | 列出已加载的类（分页、可过滤） |
 | GET | `/api/classes/{className}` | 类详情（字段、方法、父类） |
@@ -241,6 +243,8 @@ Can-Set-Native-Method-Prefix: true
 - 选择 Netty 是因为其极小的内存占用和零外部依赖
 - 运行在独立线程池上，避免干扰应用程序
 - Agent 通过反射（`Class.forName`）加载 Server，避免循环编译依赖
+- OpenAPI 文档声明 Bearer 认证，并用每个 operation 的 `x-required-role` 标注最低角色；契约测试逐一比对静态 method/path 注册，运行时插件路由有意排除。动态 GET/HEAD 路由默认要求 VIEWER，写方法默认要求 OPERATOR
+- `/docs.html` 内置 Swagger UI 页面；请求拦截器仅对同源请求复用 Web IDE Token，并关闭远程 validator，避免向外发送 API 契约
 - WebSocket 支持位于 `/ws` 路径，提供线程、GC 和内存指标的实时数据推送
 - API 端点遵循 RESTful 约定，统一在 `/api/` 路径下
 - 通过 `StaticFileHandler` 提供静态文件服务，实现嵌入式 Web UI，无需独立前端服务器
@@ -836,6 +840,7 @@ HTTP 请求 → HttpDispatcherHandler（认证中间件）
 |------|------|---------|
 | `/api/auth/login` | POST | *（无 — 公开）* |
 | `/api/auth/status` | GET | *（无 — 公开）* |
+| `/api/openapi.json` | GET | *（无 — 公开契约）* |
 | 静态文件（`/`、`/css/*`、`/js/*`） | GET | *（无 — 公开）* |
 | `/api/health` | GET | VIEWER |
 | `/api/classes`、`/api/classes/{name}` | GET | VIEWER |

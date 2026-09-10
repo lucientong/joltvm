@@ -16,12 +16,24 @@
 
 package com.joltvm.server;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.joltvm.server.handler.OpenApiHandler;
+import com.joltvm.server.security.Role;
+import com.joltvm.server.security.RoutePermissions;
 import io.netty.handler.codec.http.HttpMethod;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -51,6 +63,7 @@ class APIRoutesTest {
     @DisplayName("health endpoint is registered")
     void healthEndpoint() {
         assertNotNull(router.match(HttpMethod.GET, "/api/health"));
+        assertNotNull(router.match(HttpMethod.GET, "/api/openapi.json"));
     }
 
     @Test
@@ -95,5 +108,48 @@ class APIRoutesTest {
     void unregisteredPathsReturnNull() {
         assertNull(router.match(HttpMethod.GET, "/api/unknown"));
         assertNull(router.match(HttpMethod.DELETE, "/api/health"));
+    }
+
+    @Test
+    @DisplayName("OpenAPI contract covers every static route exactly once")
+    void openApiContractMatchesRegisteredRoutes() throws Exception {
+        Set<String> registered = new HashSet<>();
+        for (HttpRouter.Route route : router.getRoutes()) {
+            registered.add(route.getMethod().name().toLowerCase() + " " + route.getPattern());
+        }
+
+        Set<String> documented = new HashSet<>();
+        Set<String> operationIds = new HashSet<>();
+        try (InputStream input = getClass().getClassLoader()
+                .getResourceAsStream(OpenApiHandler.RESOURCE_PATH)) {
+            assertNotNull(input, "Bundled OpenAPI document must exist");
+            JsonObject paths = JsonParser.parseReader(
+                    new InputStreamReader(input, StandardCharsets.UTF_8))
+                    .getAsJsonObject().getAsJsonObject("paths");
+            for (Map.Entry<String, JsonElement> pathEntry : paths.entrySet()) {
+                for (Map.Entry<String, JsonElement> operationEntry
+                        : pathEntry.getValue().getAsJsonObject().entrySet()) {
+                    String method = operationEntry.getKey();
+                    if (!Set.of("get", "post", "put", "delete", "patch").contains(method)) {
+                        continue;
+                    }
+                    documented.add(method + " " + pathEntry.getKey());
+                    JsonObject operation = operationEntry.getValue().getAsJsonObject();
+                    String operationId = operation.get("operationId").getAsString();
+                    assertTrue(operationIds.add(operationId),
+                            "Duplicate OpenAPI operationId: " + operationId);
+
+                    Role requiredRole = RoutePermissions.getRequiredRole(
+                            method.toUpperCase(), pathEntry.getKey());
+                    String expectedRole = requiredRole == null ? "PUBLIC" : requiredRole.name();
+                    assertEquals(expectedRole, operation.get("x-required-role").getAsString(),
+                            "Incorrect documented role for "
+                                    + method.toUpperCase() + " " + pathEntry.getKey());
+                }
+            }
+        }
+
+        assertEquals(registered, documented,
+                "OpenAPI paths and APIRoutes registrations must stay synchronized");
     }
 }

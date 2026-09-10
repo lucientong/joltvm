@@ -14,7 +14,7 @@
 #
 # Build:
 #   docker build -t lucientong/joltvm .
-#   docker build --build-arg JOLTVM_VERSION=1.3.0 -t lucientong/joltvm:1.3.0 .
+#   docker build --build-arg JOLTVM_VERSION=1.4.0 -t lucientong/joltvm:1.4.0 .
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ RUN ./gradlew :joltvm-distribution:shadowJar :joltvm-cli:shadowJar -x test --no-
 # ---------------------------------------------------------------------------
 FROM eclipse-temurin:17-jdk
 
-ARG JOLTVM_VERSION=1.3.0
+ARG JOLTVM_VERSION=1.4.0
 
 # OCI image labels
 LABEL org.opencontainers.image.title="JoltVM" \

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-10
+
+### Added
+- **OpenAPI 3.1 contract** — `GET /api/openapi.json` publishes all 47 static core method/path pairs, request schemas, key query/path parameters, Bearer authentication, and per-operation `x-required-role` metadata.
+- **Built-in Swagger UI** — `/docs.html` provides interactive API documentation and is linked from the Web IDE navigation.
+- **Contract drift gate** — Tests compare every `APIRoutes` registration with the bundled OpenAPI operations and reject duplicate operation IDs.
+
+### Security
+- The OpenAPI document is public for tool discovery, while documented operations retain their existing RBAC requirements.
+- Swagger UI reuses the Web IDE token only for same-origin requests, does not persist authorization, and disables the remote schema validator.
+- Dynamic plugin and future API routes now default GET/HEAD to VIEWER and mutating methods to OPERATOR; removed stale permission entries for routes that do not exist.
+
+### Changed
+- Static route count increased from 46 to 47.
+- Updated project version to 1.4.0.
+
 ## [1.3.0] - 2026-09-10
 
 ### Added

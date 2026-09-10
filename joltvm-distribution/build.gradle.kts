@@ -67,7 +67,7 @@ tasks.shadowJar {
 
 tasks.register("verifyShadowJar") {
     group = "verification"
-    description = "Asserts the canonical agent fat JAR contains server, Web UI, and Agent-Class"
+    description = "Asserts the agent fat JAR contains server, Web UI, OpenAPI, and Agent-Class"
     dependsOn(tasks.shadowJar)
     doLast {
         val jarFile = tasks.shadowJar.get().archiveFile.get().asFile
@@ -78,7 +78,9 @@ tasks.register("verifyShadowJar") {
             val required = listOf(
                 "com/joltvm/agent/JoltVMAgent.class",
                 "com/joltvm/server/JoltVMServer.class",
-                "webui/index.html"
+                "webui/index.html",
+                "webui/docs.html",
+                "openapi/joltvm-openapi.json"
             )
             for (path in required) {
                 require(entries.contains(path)) {
